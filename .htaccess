@@ -1,0 +1,14 @@
+<IfModule mod_rewrite.c>
+    Options +FollowSymLinks
+    RewriteEngine On
+
+    # Don't force HTTPS - Allow both HTTP and HTTPS
+    # (Nothing added to force redirects)
+
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^(.*)$ index.php [L]
+
+    # Allow access to storage files (public folder)
+    RewriteRule ^storage/(.*)$ /storage/app/public/$1 [L]
+</IfModule>

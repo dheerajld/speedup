@@ -475,6 +475,55 @@ public function downloadTaskReport(Request $request)
             ],
         ]);
     }
+
+    public function taskReportEmployee(Request $request)
+{
+    $request->validate([
+        'from_date' => 'required|date',
+        'to_date' => 'required|date|after_or_equal:from_date',
+    ]);
+
+    $employee = $request->user();
+    $employeeId = $employee->id;
+
+    $from = Carbon::parse($request->from_date)->startOfDay();
+    $to = Carbon::parse($request->to_date)->endOfDay();
+    $now = now();
+    $endOfMonth = $now->copy()->endOfMonth();
+
+    // Base query for tasks assigned to the employee in the date range
+    $taskQuery = Task::whereHas('employees', function ($query) use ($employeeId) {
+        $query->where('task_assignments.employee_id', $employeeId);
+    })->whereBetween('created_at', [$from, $to]);
+
+    // Clone queries for status-wise counts
+    $pending = (clone $taskQuery)->where('status', 'pending')->count();
+    $completed = (clone $taskQuery)->where('status', 'completed')->count();
+    $expired = (clone $taskQuery)->where('status', 'expired')->count();
+    $requested = (clone $taskQuery)->where('status', 'requested')->count();
+
+    // Reset completed if to_date is end of month or beyond
+    if ($to->gte($endOfMonth)) {
+        $completed = 0;
+    }
+
+    // Get detailed tasks
+    $tasks = $taskQuery->with('employees:id,name')->get();
+
+    return response()->json([
+        'status' => 'success',
+        'data' => [
+            'from_date' => $from->toDateString(),
+            'to_date' => $to->toDateString(),
+            'pending_tasks' => $pending,
+            'completed_tasks' => $completed,
+            'expired_tasks' => $expired,
+            'requested_tasks' => $requested,
+            'tasks' => $tasks,
+        ],
+    ]);
+}
+
     
     
 }

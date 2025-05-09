@@ -43,5 +43,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/employee/employees', [TaskController::class, 'allEmployees']);
         Route::post('/employee/request-reassign-task', [TaskController::class, 'requestReassignTask']);
         Route::post('/employee/{employee}/track-location', [TaskController::class, 'trackLocation']);
+        Route::get('/employee/employee-report', [TaskController::class, 'taskReportEmployee']);
     });
 });

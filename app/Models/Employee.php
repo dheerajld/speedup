@@ -41,4 +41,9 @@ class Employee extends Authenticatable
     {
         return $this->belongsToMany(Task::class, 'task_assignments');
     }
+
+    public function latestLocation()
+{
+    return $this->hasOne(EmployeeLocation::class)->latestOfMany();
+}
 }

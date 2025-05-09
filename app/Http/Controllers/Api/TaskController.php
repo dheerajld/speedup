@@ -9,6 +9,9 @@ use Illuminate\Http\Request;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Response;
 use Illuminate\Support\Facades\Storage;
+use App\Models\EmployeeLocation;
+use App\Exports\TaskReportExport;
+use Maatwebsite\Excel\Facades\Excel;
 
 class TaskController extends Controller
 {
@@ -171,29 +174,33 @@ public function updateTaskStatus(Request $request, Task $task)
     public function index(Request $request)
     {
         $query = Task::query();
-
+    
         if ($request->type) {
             $query->where('type', $request->type);
         }
-
+    
         if ($request->status) {
             $query->where('status', $request->status);
         }
-
+    
         $tasks = $query->with('employees')->get();
-
-        // Update expired tasks
+    
+        // Update expired tasks and increment counter
         foreach ($tasks as $task) {
             if ($task->status === 'pending' && $task->deadline < Carbon::now()) {
-                $task->update(['status' => 'expired']);
+                $task->update([
+                    'status' => 'expired',
+                    'expired_count' => $task->expired_count + 1
+                ]);
             }
         }
-
+    
         return response()->json([
             'status' => 'success',
             'data' => ['tasks' => $tasks]
         ]);
     }
+    
 
     public function store(Request $request)
     {
@@ -261,6 +268,26 @@ public function updateTaskStatus(Request $request, Task $task)
         ],
     ]);
 }
+
+public function updateStatusAdmin(Request $request, Task $task)
+{
+    $request->validate([
+        'status' => 'required|in:pending,completed,expired',
+    ]);
+
+    $task->update([
+        'status' => $request->status,
+    ]);
+
+    return response()->json([
+        'status' => 'success',
+        'message' => 'Task status updated successfully',
+        'data' => [
+            'task' => $task,
+        ],
+    ]);
+}
+
 
 
     public function statistics()
@@ -340,56 +367,114 @@ public function requestReassignTask(Request $request)
 public function downloadTaskReport(Request $request)
 {
     $request->validate([
-        'type' => 'required|in:daily,weekly,monthly,yearly,once',
-        'from_date' => 'nullable|date',
-        'to_date' => 'nullable|date|after_or_equal:from_date'
+        'from_date' => 'required|date',
+        'to_date' => 'required|date|after_or_equal:from_date',
+        'employee_id' => 'required|exists:employees,id',
     ]);
 
-    $query = Task::where('type', $request->type)->with('employees');
+    // Get employee name
+    $employee = Employee::findOrFail($request->employee_id);
 
-    if ($request->filled('from_date')) {
-        $query->whereDate('created_at', '>=', Carbon::parse($request->from_date));
-    }
+    // Generate file name with employee's name
+    $fileName = 'task_report_' . $employee->name . '_' . now()->format('Ymd_His') . '.xlsx';
 
-    if ($request->filled('to_date')) {
-        $query->whereDate('created_at', '<=', Carbon::parse($request->to_date));
-    }
-
-    $tasks = $query->get();
-
-    $csvHeader = ['Task ID', 'Name', 'Description', 'Deadline', 'Status', 'Assigned Employees'];
-    $csvData = [];
-
-    foreach ($tasks as $task) {
-        $employeeNames = $task->employees->pluck('name')->join(', ');
-        $csvData[] = [
-            $task->id,
-            $task->name,
-            $task->description,
-            $task->deadline->format('Y-m-d H:i:s'),
-            $task->status,
-            $employeeNames
-        ];
-    }
-
-    $filename = 'task_report_' . $request->type . '_' . now()->format('Ymd_His') . '.csv';
-
-    $handle = fopen('php://temp', 'r+');
-    fputcsv($handle, $csvHeader);
-
-    foreach ($csvData as $row) {
-        fputcsv($handle, $row);
-    }
-
-    rewind($handle);
-    $content = stream_get_contents($handle);
-    fclose($handle);
-
-    return Response::make($content, 200, [
-        'Content-Type' => 'text/csv',
-        'Content-Disposition' => "attachment; filename=\"$filename\"",
-    ]);
+    return Excel::download(
+        new TaskReportExport($request->from_date, $request->to_date, $request->employee_id),
+        $fileName
+    );
 }
 
 
+
+    public function deleteTask($id)
+    {
+        $task = Task::find($id);
+
+        if (!$task) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Task not found'
+            ], 404);
+        }
+
+        $task->delete();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Task deleted successfully'
+        ]);
+    }
+
+    public function trackLocation(Request $request, Employee $employee)
+    {
+        $validated = $request->validate([
+            'latitude' => 'required|numeric',
+            'longitude' => 'required|numeric',
+            'name' => 'nullable|string|max:255',
+            'address' => 'nullable|string|max:255',
+        ]);
+
+        $location = EmployeeLocation::create([
+            'employee_id' => $employee->id,
+            'latitude' => $validated['latitude'],
+            'longitude' => $validated['longitude'],
+            'name' => $validated['name'] ?? null,
+            'address' => $validated['address'] ?? null,
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $location
+        ]);
+    }
+    public function taskReportAdmin(Request $request)
+    {
+        $request->validate([
+            'from_date' => 'required|date',
+            'to_date' => 'required|date|after_or_equal:from_date',
+            'employee_id' => 'required|exists:employees,id',
+        ]);
+    
+        $from = Carbon::parse($request->from_date)->startOfDay();
+        $to = Carbon::parse($request->to_date)->endOfDay();
+        $employeeId = $request->employee_id;
+    
+        $now = now();
+        $endOfMonth = $now->copy()->endOfMonth();
+    
+        // Base query for tasks assigned to the employee in the date range
+        $taskQuery = Task::whereHas('employees', function ($query) use ($employeeId) {
+            $query->where('task_assignments.employee_id', $employeeId);
+        })->whereBetween('created_at', [$from, $to]);
+    
+        // Clone queries for counts
+        $pending = (clone $taskQuery)->where('status', 'pending')->count();
+        $completed = (clone $taskQuery)->where('status', 'completed')->count();
+        $expired = (clone $taskQuery)->where('status', 'expired')->count();
+        $requested = (clone $taskQuery)->where('status', 'requested')->count();
+    
+        // Reset completed count if to_date is at or after end of month
+        if ($to->gte($endOfMonth)) {
+            $completed = 0;
+        }
+    
+        // Get all matching task details with assigned employees
+        $allTasks = $taskQuery->with('employees:id,name')->get();
+    
+        return response()->json([
+            'status' => 'success',
+            'data' => [
+                'from_date' => $from->toDateString(),
+                'to_date' => $to->toDateString(),
+                'employee_id' => $employeeId,
+                'pending_tasks' => $pending,
+                'completed_tasks' => $completed,
+                'expired_tasks' => $expired,
+                'requested_tasks' => $requested,
+                'tasks' => $allTasks,
+            ],
+        ]);
+    }
+    
+    
 }

@@ -273,20 +273,31 @@ public function updateStatusAdmin(Request $request, Task $task)
 {
     $request->validate([
         'status' => 'required|in:pending,completed,expired',
+        'deadline' => 'required|date|after:today',
     ]);
+
+    $previousStatus = $task->status;
 
     $task->update([
         'status' => $request->status,
+        'deadline' => $request->deadline,
     ]);
+
+    // Increment expired_count only when status is changed *from* expired to something else
+    if ($previousStatus === 'expired' && $request->status !== 'expired') {
+        $task->increment('expired_count');
+    }
 
     return response()->json([
         'status' => 'success',
-        'message' => 'Task status updated successfully',
+        'message' => 'Task status and deadline updated successfully',
         'data' => [
             'task' => $task,
         ],
     ]);
 }
+
+
 
 
 

@@ -21,6 +21,7 @@ class Employee extends Authenticatable
         'password',
         'image_path',
         'role',
+        'device_token',
     ];
 
     public function isAdmin()

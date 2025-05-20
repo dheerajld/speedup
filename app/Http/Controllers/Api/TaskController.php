@@ -13,6 +13,8 @@ use App\Models\EmployeeLocation;
 use App\Exports\TaskReportExport;
 use Maatwebsite\Excel\Facades\Excel;
 
+use App\Services\FcmNotificationService;
+
 class TaskController extends Controller
 {
     public function adminDashboard()
@@ -132,6 +134,23 @@ public function updateTaskStatus(Request $request, Task $task)
         ]);
     }
 
+    // Send push notification to admin when task is completed
+    if ($request->status === 'completed') {
+        $admin = Employee::where('role', 'admin')->first();
+        if ($admin && $admin->device_token) {
+            $fcm = new FcmNotificationService();
+            $fcm->sendAndSave(
+                'Task Completed',
+                'Task #' . $task->id . ' has been completed by ' . $request->user()->name,
+                'task_completed',
+                $admin->id,
+                'admin',
+                $admin->device_token,
+                ['task_id' => $task->id]
+            );
+        }
+    }
+
     return response()->json([
         'status' => 'success',
         'message' => 'Task updated successfully.',
@@ -165,6 +184,21 @@ public function updateTaskStatus(Request $request, Task $task)
 
         $task->employees()->attach($request->user()->id);
 
+        // Send push notification to admin when task is created
+        $admin = Employee::where('role', 'admin')->first();
+        if ($admin && $admin->device_token) {
+            $fcm = new FcmNotificationService();
+            $fcm->sendAndSave(
+                'New Task Request from ' . $request->user()->name,
+                $request->user()->name . ' has requested a new task: ' . $task->name . ' (Deadline: ' . Carbon::parse($task->deadline)->format('d M Y h:i A') . ')',
+                'task_created',
+                $admin->id,
+                'admin',
+                $admin->device_token,
+                ['task_id' => $task->id]
+            );
+        }
+
         return response()->json([
             'status' => 'success',
             'message' => 'Task requested successfully',
@@ -187,7 +221,24 @@ public function updateTaskStatus(Request $request, Task $task)
     
         // Update expired tasks and increment counter
         foreach ($tasks as $task) {
-            if ($task->status === 'pending' && $task->deadline < Carbon::now()) {
+            if ($task->status === 'pending' && $task->deadline < Carbon::now()->subHour(-1)) {
+                // Task expired before 1 hour, send notification to employees
+                foreach ($task->employees as $employee) {
+                    if ($employee->device_token) {
+                        $fcm = new FcmNotificationService();
+                        $fcm->sendAndSave(
+                            'Task Expiring Today',
+                            "Your task '{$task->name}' is expiring today (Deadline: " . Carbon::parse(
+                                $task->deadline
+                            )->format('d M Y h:i A') . ")",
+                            'task_expired',
+                            $employee->id,
+                            'employee',
+                            $employee->device_token,
+                            ['task_id' => $task->id]
+                        );
+                    }
+                }
                 $task->update([
                     'status' => 'expired',
                     'expired_count' => $task->expired_count + 1
@@ -204,6 +255,9 @@ public function updateTaskStatus(Request $request, Task $task)
 
     public function store(Request $request)
     {
+        // After creating a task, send push notification to employees
+        // (FCM logic will be added after task creation below)
+
         $request->validate([
             'name' => 'required|string|max:255',
             'description' => 'required|string',
@@ -222,6 +276,25 @@ public function updateTaskStatus(Request $request, Task $task)
         ]);
 
         $task->employees()->attach($request->employee_ids);
+
+        // Send push notification to assigned employees
+        $fcm = new FcmNotificationService();
+        $employees = Employee::whereIn('id', $request->employee_ids)->get();
+        foreach ($employees as $employee) {
+            if ($employee->device_token) {
+                $assignerName = $request->user() ? $request->user()->name : 'Someone';
+                $body = $assignerName . "sir has assigned you the task '{$task->name}'";
+                $fcm->sendAndSave(
+                    'New Task Assigned',
+                    $body,
+                    'task_created',
+                    $employee->id,
+                        'employee',
+                    $employee->device_token,
+                    ['task_id' => $task->id]
+                );
+            }
+        }
 
         return response()->json([
             'status' => 'success',
@@ -345,13 +418,29 @@ public function requestReassignTask(Request $request)
     $task->employees()->detach($employee->id);
 
     // Attach the new employee(s) to same task_id (if not already assigned)
-    foreach ($request->to_employee_ids as $toEmployeeId) {
-        $alreadyAssigned = $task->employees()->wherePivot('employee_id', $toEmployeeId)->exists();
-        
-        if (!$alreadyAssigned) {
-            $task->employees()->attach($toEmployeeId);
+        foreach ($request->to_employee_ids as $toEmployeeId) {
+            $alreadyAssigned = $task->employees()->wherePivot('employee_id', $toEmployeeId)->exists();
+            
+            if (!$alreadyAssigned) {
+                $task->employees()->attach($toEmployeeId);
+            }
         }
-    }
+        // Send push notification to new employees
+        $fcm = new FcmNotificationService();
+        $newEmployees = Employee::whereIn('id', $request->to_employee_ids)->get();
+        foreach ($newEmployees as $employee) {
+            if ($employee->device_token) {
+                $fcm->sendAndSave(
+                    'Task Reassigned',
+                    'You have been reassigned to task: ' . $task->name,
+                    'task_reassigned',
+                    $employee->id,
+                    'employee',
+                    $employee->device_token,
+                    ['task_id' => $task->id]
+                );
+            }
+        }
 
     return response()->json([
         'status' => 'success',

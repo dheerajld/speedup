@@ -10,6 +10,16 @@ Route::post('/login', [AuthController::class, 'login']);
 
 // Protected routes
 Route::middleware('auth:sanctum')->group(function () {
+    // Save device token endpoint
+    Route::post('/save-device-token', function (\Illuminate\Http\Request $request) {
+        $request->validate([
+            'device_token' => 'required|string',
+        ]);
+        $user = $request->user();
+        $user->device_token = $request->device_token;
+        $user->save();
+        return response()->json(['message' => 'Device token saved successfully']);
+    });
     // Common routes
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/profile', [AuthController::class, 'profile']);

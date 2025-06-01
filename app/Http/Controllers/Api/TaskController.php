@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Storage;
 use App\Models\EmployeeLocation;
 use App\Exports\TaskReportExport;
 use Maatwebsite\Excel\Facades\Excel;
+use App\Models\Notification;
 
 use App\Services\FcmNotificationService;
 
@@ -624,6 +625,21 @@ public function downloadTaskReport(Request $request)
         ],
     ]);
 }
+
+public function employeeNotificationList(Request $request)
+{
+    $employee = $request->user();
+
+    $notifications = Notification::where('recipient_id', $employee->id)
+        ->orderBy('created_at', 'desc')
+        ->get();
+
+    return response()->json([
+        'status' => 'success',
+        'data' => ['notifications' => $notifications]
+    ]);
+}
+
 
     
     

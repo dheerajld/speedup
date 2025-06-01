@@ -23,4 +23,9 @@ class Notification extends Model
         'data' => 'array',
         'sent_at' => 'datetime',
     ];
+    public function getIsReadAttribute()
+{
+    return !is_null($this->read_at);
+}
+
 }

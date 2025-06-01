@@ -637,11 +637,35 @@ public function employeeNotificationList(Request $request)
         ->orderBy('created_at', 'desc')
         ->get();
 
+    $unreadCount = Notification::where('recipient_id', $employee->id)
+        ->whereNull('read_at')
+        ->count();
+
     return response()->json([
         'status' => 'success',
-        'data' => ['notifications' => $notifications]
+        'data' => [
+            'notifications' => $notifications,
+            'unread_count' => $unreadCount,
+        ]
     ]);
 }
+
+public function markAllNotificationsAsRead(Request $request)
+{
+    $userId = $request->user()->id;
+
+    Notification::where('recipient_id', $userId)
+        ->whereNull('read_at')
+        ->update(['read_at' => now()]);
+
+    return response()->json([
+        'status' => 'success',
+        'message' => 'All unread notifications marked as read.'
+    ]);
+}
+
+
+
 
 
     

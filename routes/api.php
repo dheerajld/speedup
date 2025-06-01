@@ -25,6 +25,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/profile', [AuthController::class, 'profile']);
     Route::get('/notifications', [TaskController::class, 'employeeNotificationList']);
+    Route::post('/notifications/mark-all-read', [TaskController::class, 'markAllNotificationsAsRead']);
 
     // Admin routes
     Route::middleware('admin')->group(function () {

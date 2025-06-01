@@ -396,15 +396,18 @@ public function updateStatusAdmin(Request $request, Task $task)
         ]);
     }
     
-    public function allEmployees()
+public function allEmployees()
 {
-    $employees = Employee::where('role', 'employee')->get();
+    $employees = Employee::where('role', 'employee')
+        ->with(['latestLocation']) // eager load latest location
+        ->get();
 
     return response()->json([
         'status' => 'success',
         'data' => ['employees' => $employees]
     ]);
 }
+
 
 public function requestReassignTask(Request $request)
 {

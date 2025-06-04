@@ -103,4 +103,20 @@ class AuthController extends Controller
             ]
         ]);
     }
+
+    public function deleteEmployee(Request $request)
+    {
+        $employee = Employee::find($request->id);
+        if (!$employee) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Employee not found'
+            ]);
+        }
+        $employee->delete();
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Employee deleted successfully'
+        ]);
+    }
 }

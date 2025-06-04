@@ -40,6 +40,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/admin/employees', [TaskController::class, 'allEmployees']);
         Route::get('/admin/task-report', [TaskController::class, 'downloadTaskReport']);
         Route::patch('/admin/tasks/{task}/status', [TaskController::class, 'updateStatusAdmin']);
+        Route::delete('/admin/employees/{employee}', [AuthController::class, 'deleteEmployee']);
  
 
         

@@ -23,8 +23,11 @@ class Task extends Model
         'deadline' => 'datetime'
     ];
 
-    public function employees()
-    {
-        return $this->belongsToMany(Employee::class, 'task_assignments');
-    }
+   public function employees()
+{
+    return $this->belongsToMany(Employee::class, 'task_assignments')
+                ->withPivot('assigned_by')
+                ->withTimestamps();
+}
+
 }

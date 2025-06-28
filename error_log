@@ -1,0 +1,6 @@
+[16-May-2025 17:40:35 UTC] PHP Warning:  require(/home/ilpyxxqd41r1/public_html/test.speedupinfotech.com/speedup/vendor/autoload.php): Failed to open stream: No such file or directory in /home/ilpyxxqd41r1/public_html/test.speedupinfotech.com/speedup/artisan on line 18
+[16-May-2025 17:40:35 UTC] PHP Warning:  require(/home/ilpyxxqd41r1/public_html/test.speedupinfotech.com/speedup/vendor/autoload.php): Failed to open stream: No such file or directory in /home/ilpyxxqd41r1/public_html/test.speedupinfotech.com/speedup/artisan on line 18
+[16-May-2025 17:40:35 UTC] PHP Fatal error:  Uncaught Error: Failed opening required '/home/ilpyxxqd41r1/public_html/test.speedupinfotech.com/speedup/vendor/autoload.php' (include_path='.:/opt/alt/php81/usr/share/pear:/opt/alt/php81/usr/share/php:/usr/share/pear:/usr/share/php') in /home/ilpyxxqd41r1/public_html/test.speedupinfotech.com/speedup/artisan:18
+Stack trace:
+#0 {main}
+  thrown in /home/ilpyxxqd41r1/public_html/test.speedupinfotech.com/speedup/artisan on line 18

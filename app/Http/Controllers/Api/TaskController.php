@@ -54,7 +54,7 @@ class TaskController extends Controller
     // Separate query for detailed task list (if you want relationships)
     $taskList = $employee->tasks()
         ->with('employees')
-        ->orderBy('deadline')
+        ->orderByDesc('created_at')
         ->get()
         ->map(function ($task) {
             return [

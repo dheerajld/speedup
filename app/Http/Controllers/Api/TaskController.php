@@ -218,7 +218,9 @@ public function updateTaskStatus(Request $request, Task $task)
             $query->where('status', $request->status);
         }
     
-        $tasks = $query->with('employees')->get();
+        $tasks = $query->with('employees')
+               ->orderBy('created_at', 'desc')
+               ->get();
     
         // Update expired tasks and increment counter
         foreach ($tasks as $task) {

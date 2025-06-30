@@ -103,20 +103,24 @@ class AuthController extends Controller
             ]
         ]);
     }
-
-    public function deleteEmployee(Request $request)
-    {
-        $employee = Employee::find($request->id);
-        if (!$employee) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Employee not found'
-            ]);
-        }
-        $employee->delete();
+    
+   public function deleteEmployee(Employee $employee)
+{
+    // Optional: Prevent self-deletion or admin deletion
+    if (auth()->id() === $employee->id) {
         return response()->json([
-            'status' => 'success',
-            'message' => 'Employee deleted successfully'
-        ]);
+            'status' => 'error',
+            'message' => 'You cannot delete your own account'
+        ], 403);
     }
+
+    $employee->delete();
+
+    return response()->json([
+        'status' => 'success',
+        'message' => 'Employee deleted successfully'
+    ]);
+}
+
+
 }

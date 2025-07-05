@@ -43,11 +43,11 @@ class TaskController extends Controller
     $tasks = $employee->tasks()->get();
 
     $stats = [
+        'once_tasks' => $tasks->where('type', 'once')->count(),
         'daily_tasks' => $tasks->where('type', 'daily')->count(),
         'weekly_tasks' => $tasks->where('type', 'weekly')->count(),
         'monthly_tasks' => $tasks->where('type', 'monthly')->count(),
         'yearly_tasks' => $tasks->where('type', 'yearly')->count(),
-        'once_tasks' => $tasks->where('type', 'once')->count(),
         'requested_tasks' => 0 // Implement if needed
     ];
 
@@ -381,11 +381,11 @@ public function updateStatusAdmin(Request $request, Task $task)
     public function statistics()
     {
         $stats = [
+            'once' => Task::where('type', 'once')->count(),
             'daily' => Task::where('type', 'daily')->count(),
             'weekly' => Task::where('type', 'weekly')->count(),
             'monthly' => Task::where('type', 'monthly')->count(),
             'yearly' => Task::where('type', 'yearly')->count(),
-            'once' => Task::where('type', 'once')->count(),
             'pending' => Task::where('status', 'pending')->count(),
             'completed' => Task::where('status', 'completed')->count(),
             'expired' => Task::where('status', 'expired')->count(),

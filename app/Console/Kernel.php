@@ -10,9 +10,15 @@ class Kernel extends ConsoleKernel
     /**
      * Define the application's command schedule.
      */
+     
+     protected $commands = [
+        \App\Console\Commands\SendTaskExpirationNotifications::class,
+    ];
+     
     protected function schedule(Schedule $schedule): void
     {
         // $schedule->command('inspire')->hourly();
+         $schedule->command('task:send-expiration-notifications')->everyFiveMinutes();
     }
 
     /**
@@ -24,4 +30,5 @@ class Kernel extends ConsoleKernel
 
         require base_path('routes/console.php');
     }
+    
 }

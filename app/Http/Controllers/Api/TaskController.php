@@ -13,6 +13,7 @@ use App\Models\EmployeeLocation;
 use App\Exports\TaskReportExport;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Models\Notification;
+use Illuminate\Support\Facades\DB;
 
 use App\Services\FcmNotificationService;
 
@@ -256,55 +257,61 @@ public function updateTaskStatus(Request $request, Task $task)
     }
     
 
-    public function store(Request $request)
-    {
-        // After creating a task, send push notification to employees
-        // (FCM logic will be added after task creation below)
+  public function store(Request $request)
+{
+    $request->validate([
+        'name' => 'required|string|max:255',
+        'description' => 'required|string',
+        'type' => 'required|in:daily,weekly,monthly,yearly,once',
+        'deadline' => 'required|date|after:now',
+        'employee_ids' => 'required|array',
+        'employee_ids.*' => 'exists:employees,id'
+    ]);
 
-        $request->validate([
-            'name' => 'required|string|max:255',
-            'description' => 'required|string',
-            'type' => 'required|in:daily,weekly,monthly,yearly,once',
-            'deadline' => 'required|date|after:now',
-            'employee_ids' => 'required|array',
-            'employee_ids.*' => 'exists:employees,id'
-        ]);
+    $task = Task::create([
+        'name' => $request->name,
+        'description' => $request->description,
+        'type' => $request->type,
+        'deadline' => $request->deadline,
+        'status' => 'pending'
+    ]);
 
-        $task = Task::create([
-            'name' => $request->name,
-            'description' => $request->description,
-            'type' => $request->type,
-            'deadline' => $request->deadline,
-            'status' => 'pending'
-        ]);
+    $assignedById = $request->user()->id ?? null;
 
-        $task->employees()->attach($request->employee_ids);
-
-        // Send push notification to assigned employees
-        $fcm = new FcmNotificationService();
-        $employees = Employee::whereIn('id', $request->employee_ids)->get();
-        foreach ($employees as $employee) {
-            if ($employee->device_token) {
-                $assignerName = $request->user() ? $request->user()->name : 'Someone';
-                $body = $assignerName . "sir has assigned you the task '{$task->name}'";
-                $fcm->sendAndSave(
-                    'New Task Assigned',
-                    $body,
-                    'task_created',
-                    $employee->id,
-                        'employee',
-                    $employee->device_token,
-                    ['task_id' => $task->id]
-                );
-            }
-        }
-
-        return response()->json([
-            'status' => 'success',
-            'message' => 'Task created successfully',
-            'data' => ['task' => $task->load('employees')]
-        ], 201);
+    // Attach employees with assigned_by in pivot
+    $attachData = [];
+    foreach ($request->employee_ids as $employeeId) {
+        $attachData[$employeeId] = ['assigned_by' => $assignedById];
     }
+
+    $task->employees()->attach($attachData);
+
+    // Send push notifications
+    $fcm = new FcmNotificationService();
+    $employees = Employee::whereIn('id', $request->employee_ids)->get();
+    foreach ($employees as $employee) {
+        if ($employee->device_token) {
+            $assignerName = $request->user() ? $request->user()->name : 'Someone';
+            $body = $assignerName . " has assigned you the task '{$task->name}'";
+            $fcm->sendAndSave(
+                'New Task Assigned',
+                $body,
+                'task_created',
+                $employee->id,
+                'employee',
+                $employee->device_token,
+                ['task_id' => $task->id]
+            );
+        }
+    }
+
+    return response()->json([
+        'status' => 'success',
+        'message' => 'Task created successfully',
+        'data' => ['task' => $task->load('employees')]
+    ], 201);
+}
+
 
     public function show(Task $task)
     {
@@ -400,8 +407,7 @@ public function updateStatusAdmin(Request $request, Task $task)
     
 public function allEmployees()
 {
-    $employees = Employee::where('role', 'employee')
-        ->with(['latestLocation']) // eager load latest location
+    $employees = Employee::with(['latestLocation']) // eager load latest location
         ->get();
 
     return response()->json([
@@ -663,6 +669,46 @@ public function markAllNotificationsAsRead(Request $request)
     return response()->json([
         'status' => 'success',
         'message' => 'All unread notifications marked as read.'
+    ]);
+}
+
+public function employeeDeleteTask(Request $request, $id)
+{
+    // Find the task with related employees
+    $task = Task::with('employees')->find($id);
+
+    if (!$task) {
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Task not found',
+        ], 404);
+    }
+
+    // Get authenticated user (assuming employee is logged in)
+    $authUser = $request->user();
+
+    // Check if the authenticated user is the assigner of this task
+    $isAssigner = DB::table('task_assignments')
+        ->where('task_id', $task->id)
+        ->where('assigned_by', $authUser->id)
+        ->exists();
+
+    if (!$isAssigner) {
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Unauthorized: You did not assign this task.',
+        ], 403);
+    }
+
+    // Optional: detach assigned employees
+    $task->employees()->detach();
+
+    // Delete the task (soft delete or force delete based on model setup)
+    $task->delete();
+
+    return response()->json([
+        'status' => 'success',
+        'message' => 'Task deleted successfully',
     ]);
 }
 

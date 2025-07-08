@@ -38,10 +38,13 @@ class Employee extends Authenticatable
         'password',
     ];
 
-    public function tasks()
-    {
-        return $this->belongsToMany(Task::class, 'task_assignments');
-    }
+  public function tasks()
+{
+    return $this->belongsToMany(Task::class, 'task_assignments')
+                ->withPivot('assigned_by')
+                ->withTimestamps();
+}
+
 
     public function latestLocation()
 {

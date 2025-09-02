@@ -36,47 +36,78 @@ class TaskController extends Controller
         ]);
     }
 
-   public function employeeDashboard(Request $request)
+public function employeeDashboard(Request $request)
 {
     $employee = $request->user();
-    
-    // FETCH tasks ONCE as a COLLECTION
+
+    // ✅ Fetch all tasks assigned to this employee
     $tasks = $employee->tasks()->get();
 
+    // ✅ Stats
     $stats = [
-        'once_tasks' => $tasks->where('type', 'once')->count(),
-        'daily_tasks' => $tasks->where('type', 'daily')->count(),
-        'weekly_tasks' => $tasks->where('type', 'weekly')->count(),
-        'monthly_tasks' => $tasks->where('type', 'monthly')->count(),
-        'yearly_tasks' => $tasks->where('type', 'yearly')->count(),
-        'requested_tasks' => 0 // Implement if needed
+        'once_tasks'     => $tasks->where('type', 'once')->count(),
+        'daily_tasks'    => $tasks->where('type', 'daily')->count(),
+        'weekly_tasks'   => $tasks->where('type', 'weekly')->count(),
+        'monthly_tasks'  => $tasks->where('type', 'monthly')->count(),
+        'yearly_tasks'   => $tasks->where('type', 'yearly')->count(),
+        'requested_tasks'=> Task::whereHas('employees', function ($q) use ($employee) {
+                                $q->where('task_assignments.assigned_by', $employee->id);
+                             })->count()
     ];
 
-    // Separate query for detailed task list (if you want relationships)
+    // ✅ Assigned tasks (to logged-in employee)
     $taskList = $employee->tasks()
-        ->with('employees')
+        ->with('employees:id,name') // only fetch necessary fields
         ->orderByDesc('created_at')
         ->get()
         ->map(function ($task) {
             return [
-                'task_no' => $task->id,
-                'name' => $task->name,
-                'description' => $task->description,
-                'assigned_date' => $task->created_at->format('Y-m-d H:i:s'),
-                'deadline' => $task->deadline->format('Y-m-d H:i:s'),
-                'status' => $task->status,
-                'type' => $task->type
+                'task_no'      => $task->id,
+                'name'         => $task->name,
+                'description'  => $task->description,
+                'assigned_date'=> $task->created_at->format('Y-m-d H:i:s'),
+                'deadline'     => $task->deadline ? $task->deadline->format('Y-m-d H:i:s') : null,
+                'status'       => $task->status,
+                'type'         => $task->type,
+                'assigned_to'  => $task->employees->pluck('name') // list of employees
             ];
         });
+
+    // ✅ Tasks created/assigned by this employee
+   $createdTasks = Task::whereHas('employees', function ($q) use ($employee) {
+        $q->where('task_assignments.assigned_by', $employee->id);
+    })
+    ->with([
+        'employees' => function ($q) {
+            $q->select(
+                'employees.id',
+                'employees.name',
+                'employees.email',
+                'employees.contact_number',
+                'employees.designation',
+                'employees.employee_id',
+                'employees.username',
+                'employees.image_path',
+                'employees.role',
+                'employees.device_token',
+                'employees.created_at',
+                'employees.updated_at'
+            );
+        }
+    ])
+    ->orderByDesc('created_at')
+    ->get();
 
     return response()->json([
         'status' => 'success',
         'data' => [
             'statistics' => $stats,
-            'tasks' => $taskList
+            'tasks' => $taskList,
+            'created_and_assigned' => $createdTasks
         ]
     ]);
 }
+
 
 
     public function employeeTasks(Request $request)
@@ -111,6 +142,7 @@ public function updateTaskStatus(Request $request, Task $task)
 
     $employee = $request->user();
 
+    // ✅ Check authorization
     if (!$task->employees->contains($employee->id)) {
         return response()->json([
             'status' => 'error',
@@ -118,17 +150,19 @@ public function updateTaskStatus(Request $request, Task $task)
         ], 403);
     }
 
+    // ✅ Update task status
     $task->update([
         'status' => $request->status,
     ]);
 
+    // ✅ Sync employees if provided
     if ($request->filled('employee_ids')) {
         $task->employees()->sync($request->employee_ids);
     }
 
-    // Save base64 strings directly
+    // ✅ Save base64 photos
     if ($request->filled('photo_base64')) {
-        $existingBase64 = $task->photo_base64 ?? []; // Assuming it's casted to array
+        $existingBase64 = $task->photos ?? []; // Assuming it's casted to array
         $mergedBase64 = array_merge($existingBase64, $request->photo_base64);
 
         $task->update([
@@ -136,20 +170,43 @@ public function updateTaskStatus(Request $request, Task $task)
         ]);
     }
 
-    // Send push notification to admin when task is completed
+    // ✅ Send push notification when completed
     if ($request->status === 'completed') {
+        $fcm = new FcmNotificationService();
+
+        // 1. Notify Admin
         $admin = Employee::where('role', 'admin')->first();
         if ($admin && $admin->device_token) {
-            $fcm = new FcmNotificationService();
             $fcm->sendAndSave(
                 'Task Completed',
-                'Task #' . $task->id . ' has been completed by ' . $request->user()->name,
+                'Task #' . $task->id . ' has been completed by ' . $employee->name,
                 'task_completed',
                 $admin->id,
                 'admin',
                 $admin->device_token,
                 ['task_id' => $task->id]
             );
+        }
+
+        // 2. Notify Task Creator (assigned_by in pivot)
+        $creatorId = $task->employees()
+            ->wherePivot('employee_id', $employee->id)
+            ->pluck('task_assignments.assigned_by')
+            ->first();
+
+        if ($creatorId) {
+            $creator = Employee::find($creatorId);
+            if ($creator && $creator->device_token) {
+                $fcm->sendAndSave(
+                    'Task Completed by Employee',
+                    $employee->name . ' has completed the task: ' . $task->name,
+                    'task_completed',
+                    $creator->id,
+                    'employee',
+                    $creator->device_token,
+                    ['task_id' => $task->id]
+                );
+            }
         }
     }
 
@@ -161,6 +218,7 @@ public function updateTaskStatus(Request $request, Task $task)
         ],
     ]);
 }
+
 
 
 
@@ -320,8 +378,9 @@ public function updateTaskStatus(Request $request, Task $task)
             'data' => ['task' => $task->load('employees')]
         ]);
     }
-
-  public function update(Request $request, Task $task)
+    
+    
+public function update(Request $request, Task $task)
 {
     $request->validate([
         'type' => 'nullable|string|max:255',
@@ -343,6 +402,35 @@ public function updateTaskStatus(Request $request, Task $task)
         $task->employees()->sync($request->employee_ids);
     }
 
+    // ✅ Always send notification on task update
+    foreach ($task->employees as $emp) {
+        if ($emp->pivot && $emp->pivot->assigned_by) {
+            $assignedBy = Employee::find($emp->pivot->assigned_by);
+
+            if ($assignedBy) {
+                $title = 'Task Updated';
+                $message = "The task '{$task->name}' assigned to {$emp->name} has been updated. Current status: {$task->status}.";
+
+                // Save notification in DB
+                Notification::create([
+                    'employee_id' => $assignedBy->id,
+                    'title' => $title,
+                    'message' => $message,
+                    'type' => 'task_update',
+                ]);
+
+                // Send FCM push notification
+                if ($assignedBy->device_token) {
+                    sendFCMNotification(
+                        $assignedBy->device_token,
+                        $title,
+                        $message
+                    );
+                }
+            }
+        }
+    }
+
     return response()->json([
         'status' => 'success',
         'message' => 'Task updated successfully',
@@ -351,6 +439,7 @@ public function updateTaskStatus(Request $request, Task $task)
         ],
     ]);
 }
+
 
 public function updateStatusAdmin(Request $request, Task $task)
 {
@@ -674,42 +763,21 @@ public function markAllNotificationsAsRead(Request $request)
 
 public function employeeDeleteTask(Request $request, $id)
 {
-    // Find the task with related employees
-    $task = Task::with('employees')->find($id);
+     $task = Task::find($id);
 
-    if (!$task) {
+        if (!$task) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Task not found'
+            ], 404);
+        }
+
+        $task->delete();
+
         return response()->json([
-            'status' => 'error',
-            'message' => 'Task not found',
-        ], 404);
-    }
-
-    // Get authenticated user (assuming employee is logged in)
-    $authUser = $request->user();
-
-    // Check if the authenticated user is the assigner of this task
-    $isAssigner = DB::table('task_assignments')
-        ->where('task_id', $task->id)
-        ->where('assigned_by', $authUser->id)
-        ->exists();
-
-    if (!$isAssigner) {
-        return response()->json([
-            'status' => 'error',
-            'message' => 'Unauthorized: You did not assign this task.',
-        ], 403);
-    }
-
-    // Optional: detach assigned employees
-    $task->employees()->detach();
-
-    // Delete the task (soft delete or force delete based on model setup)
-    $task->delete();
-
-    return response()->json([
-        'status' => 'success',
-        'message' => 'Task deleted successfully',
-    ]);
+            'status' => 'success',
+            'message' => 'Task deleted successfully'
+        ]);
 }
 
 

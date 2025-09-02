@@ -13,12 +13,15 @@ class Kernel extends ConsoleKernel
      
      protected $commands = [
         \App\Console\Commands\SendTaskExpirationNotifications::class,
+         \App\Console\Commands\ResetExpiredTasks::class,
     ];
      
     protected function schedule(Schedule $schedule): void
     {
         // $schedule->command('inspire')->hourly();
          $schedule->command('task:send-expiration-notifications')->everyFiveMinutes();
+          // Schedule new task reset command daily at midnight
+        $schedule->command('tasks:reset-expired')->dailyAt('00:00');
     }
 
     /**

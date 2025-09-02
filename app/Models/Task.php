@@ -30,4 +30,12 @@ class Task extends Model
                 ->withTimestamps();
 }
 
+ /**
+     * Assignments (with assigned_by relation)
+     */
+    public function assignments()
+    {
+        return $this->hasMany(TaskAssignment::class);
+    }
+
 }

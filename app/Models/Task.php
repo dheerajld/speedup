@@ -10,25 +10,28 @@ class Task extends Model
 {
     use HasFactory;
 
-    protected $fillable = [
+       protected $fillable = [
         'name',
         'description',
         'type',
         'deadline',
         'status',
-        'photos'
+        'created_by',
+        'photos',    
+        'expired_count'
     ];
 
     protected $casts = [
-        'deadline' => 'datetime'
+        'photos'   => 'array',
+        'deadline' => 'datetime',
     ];
 
-   public function employees()
-{
-    return $this->belongsToMany(Employee::class, 'task_assignments')
-                ->withPivot('assigned_by')
-                ->withTimestamps();
-}
+  public function employees()
+    {
+        return $this->belongsToMany(Employee::class, 'task_assignments')
+            ->withPivot(['status', 'assigned_by', 'created_at', 'updated_at'])
+            ->withTimestamps();
+    }
 
  /**
      * Assignments (with assigned_by relation)

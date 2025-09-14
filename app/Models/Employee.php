@@ -41,7 +41,7 @@ class Employee extends Authenticatable
   public function tasks()
 {
     return $this->belongsToMany(Task::class, 'task_assignments')
-                ->withPivot('assigned_by')
+                ->withPivot('status', 'assigned_by')
                 ->withTimestamps();
 }
 

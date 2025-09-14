@@ -15,6 +15,7 @@ class TaskAssignment extends Model
         'task_id',
         'employee_id',
         'assigned_by',
+        'status'
     ];
 
     /**

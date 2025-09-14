@@ -19,130 +19,158 @@ use App\Services\FcmNotificationService;
 
 class TaskController extends Controller
 {
-    public function adminDashboard()
-    {
-        $stats = [
-            'total_tasks' => Task::count(),
-            'pending_tasks' => Task::where('status', 'pending')->count(),
-            'completed_tasks' => Task::where('status', 'completed')->count(),
-            'expired_tasks' => Task::where('status', 'expired')->count(),
-            'requested_tasks' => Task::where('status', 'requested')->count(),
-            'total_employees' => Employee::where('role', 'employee')->count()
-        ];
+  public function adminDashboard()
+{
+    $stats = [
+        // Total distinct tasks
+        'total_tasks'      => Task::count(),
+        // Status counts from pivot (employee-specific)
+        'pending_tasks'    => \DB::table('task_assignments')->where('status', 'pending')->count(),
+        'completed_tasks'  => \DB::table('task_assignments')->where('status', 'completed')->count(),
+        'expired_tasks'    => \DB::table('task_assignments')->where('status', 'expired')->count(),
+        'requested_tasks'  => \DB::table('task_assignments')->where('status', 'requested')->count(),
 
-        return response()->json([
-            'status' => 'success',
-            'data' => ['statistics' => $stats]
-        ]);
-    }
+        // Total employees
+        'total_employees'  => Employee::where('role', 'employee')->count(),
+    ];
+
+    return response()->json([
+        'status' => 'success',
+        'data'   => ['statistics' => $stats]
+    ]);
+}
+
 
 public function employeeDashboard(Request $request)
 {
     $employee = $request->user();
 
-    // ✅ Fetch all tasks assigned to this employee
-    $tasks = $employee->tasks()->get();
+    // etch tasks assigned to this employee (with pivot status)
+    $tasks = $employee->tasks()->withPivot('status')->get();
 
-    // ✅ Stats
+    // tats based on employee’s pivot status & type
     $stats = [
-        'once_tasks'     => $tasks->where('type', 'once')->count(),
-        'daily_tasks'    => $tasks->where('type', 'daily')->count(),
-        'weekly_tasks'   => $tasks->where('type', 'weekly')->count(),
-        'monthly_tasks'  => $tasks->where('type', 'monthly')->count(),
-        'yearly_tasks'   => $tasks->where('type', 'yearly')->count(),
-        'requested_tasks'=> Task::whereHas('employees', function ($q) use ($employee) {
+        'once_tasks'      => $tasks->where('type', 'once')->count(),
+        'daily_tasks'     => $tasks->where('type', 'daily')->count(),
+        'weekly_tasks'    => $tasks->where('type', 'weekly')->count(),
+        'monthly_tasks'   => $tasks->where('type', 'monthly')->count(),
+        'yearly_tasks'    => $tasks->where('type', 'yearly')->count(),
+        'requested_tasks' => Task::whereHas('employees', function ($q) use ($employee) {
                                 $q->where('task_assignments.assigned_by', $employee->id);
-                             })->count()
+                            })->count(),
+        'completed_tasks' => $tasks->filter(fn($t) => $t->pivot->status === 'completed')->count(),
+        'pending_tasks'   => $tasks->filter(fn($t) => $t->pivot->status === 'pending')->count(),
+        'expired_tasks'   => $tasks->filter(fn($t) => $t->pivot->status === 'expired')->count(),
     ];
 
-    // ✅ Assigned tasks (to logged-in employee)
+    // Assigned tasks (specific to logged-in employee)
     $taskList = $employee->tasks()
         ->with('employees:id,name') // only fetch necessary fields
         ->orderByDesc('created_at')
         ->get()
-        ->map(function ($task) {
+        ->map(function ($task) use ($employee) {
             return [
-                'task_no'      => $task->id,
-                'name'         => $task->name,
-                'description'  => $task->description,
-                'assigned_date'=> $task->created_at->format('Y-m-d H:i:s'),
-                'deadline'     => $task->deadline ? $task->deadline->format('Y-m-d H:i:s') : null,
-                'status'       => $task->status,
-                'type'         => $task->type,
-                'assigned_to'  => $task->employees->pluck('name') // list of employees
+                'task_no'       => $task->id,
+                'name'          => $task->name,
+                'description'   => $task->description,
+                'created_by' => $task->created_by,
+                'assigned_date' => $task->created_at->format('Y-m-d H:i:s'),
+                'deadline'      => $task->deadline ? $task->deadline->format('Y-m-d H:i:s') : null,
+                'status'        => $task->employees->where('id', $employee->id)->first()?->pivot->status, // employee-specific
+                'type'          => $task->type,
+                'assigned_to'   => $task->employees->pluck('name'),
             ];
         });
 
-    // ✅ Tasks created/assigned by this employee
-   $createdTasks = Task::whereHas('employees', function ($q) use ($employee) {
-        $q->where('task_assignments.assigned_by', $employee->id);
-    })
-    ->with([
-        'employees' => function ($q) {
-            $q->select(
-                'employees.id',
-                'employees.name',
-                'employees.email',
-                'employees.contact_number',
-                'employees.designation',
-                'employees.employee_id',
-                'employees.username',
-                'employees.image_path',
-                'employees.role',
-                'employees.device_token',
-                'employees.created_at',
-                'employees.updated_at'
-            );
-        }
-    ])
-    ->orderByDesc('created_at')
-    ->get();
+    // Tasks created/assigned by this employee
+    $createdTasks = Task::whereHas('employees', function ($q) use ($employee) {
+            $q->where('task_assignments.assigned_by', $employee->id);
+        })
+        ->with([
+            'employees' => function ($q) {
+                $q->select(
+                    'employees.id',
+                    'employees.name',
+                    'employees.email',
+                    'employees.contact_number',
+                    'employees.designation',
+                    'employees.employee_id',
+                    'employees.username',
+                    'employees.image_path',
+                    'employees.role',
+                    'employees.device_token',
+                    'employees.created_at',
+                    'employees.updated_at'
+                );
+            }
+        ])
+        ->orderByDesc('created_at')
+        ->get();
 
     return response()->json([
         'status' => 'success',
-        'data' => [
-            'statistics' => $stats,
-            'tasks' => $taskList,
-            'created_and_assigned' => $createdTasks
+        'data'   => [
+            'statistics'          => $stats,
+            'tasks'               => $taskList,
+            'created_and_assigned'=> $createdTasks,
         ]
     ]);
 }
 
 
 
-    public function employeeTasks(Request $request)
-    {
-        $employee = $request->user();
-        $tasks = $employee->tasks()
-            ->with('employees')
-            ->when($request->type, function ($query, $type) {
-                return $query->where('type', $type);
-            })
-            ->when($request->status, function ($query, $status) {
-                return $query->where('status', $status);
-            })
-            ->orderBy('deadline')
-            ->get();
 
-        return response()->json([
-            'status' => 'success',
-            'data' => ['tasks' => $tasks]
-        ]);
-    }
+ public function employeeTasks(Request $request)
+{
+    $employee = $request->user();
+
+    $tasks = $employee->tasks()
+        ->with('employees:id,name') // load other employees' names
+        ->when($request->type, function ($query, $type) {
+            return $query->where('type', $type);
+        })
+        ->when($request->status, function ($query, $status) use ($employee) {
+            // ✅ Filter by pivot status instead of global task status
+            return $query->whereHas('employees', function ($q) use ($employee, $status) {
+                $q->where('employee_id', $employee->id)
+                  ->where('task_assignments.status', $status);
+            });
+        })
+        ->orderBy('deadline')
+        ->get()
+        ->map(function ($task) use ($employee) {
+            return [
+                'task_no'      => $task->id,
+                'name'         => $task->name,
+                 'photos' => $task->photos,
+                'description'  => $task->description,
+                'created_by' => $task->created_by,
+                'assigned_date'=> $task->created_at->format('Y-m-d H:i:s'),
+                'deadline'     => $task->deadline ? $task->deadline->format('Y-m-d H:i:s') : null,
+                'status'       => $task->employees->where('id', $employee->id)->first()?->pivot->status, // 👈 employee-specific
+                'type'         => $task->type,
+                'assigned_to'  => $task->employees->pluck('name'),
+            ];
+        });
+
+    return response()->json([
+        'status' => 'success',
+        'data' => ['tasks' => $tasks]
+    ]);
+}
+
 
 public function updateTaskStatus(Request $request, Task $task)
 {
     $request->validate([
         'status' => 'required|in:completed,expired,requested,pending',
-        'employee_ids' => 'nullable|array',
-        'employee_ids.*' => 'exists:employees,id',
         'photo_base64' => 'nullable|array',
-        'photo_base64.*' => 'string', // Each base64 image as a string
+        'photo_base64.*' => 'string',
     ]);
 
     $employee = $request->user();
 
-    // ✅ Check authorization
+    // ✅ Ensure employee is assigned
     if (!$task->employees->contains($employee->id)) {
         return response()->json([
             'status' => 'error',
@@ -150,31 +178,29 @@ public function updateTaskStatus(Request $request, Task $task)
         ], 403);
     }
 
-    // ✅ Update task status
-    $task->update([
+    // ✅ Update only this employee’s pivot status
+    $task->employees()->updateExistingPivot($employee->id, [
         'status' => $request->status,
     ]);
 
-    // ✅ Sync employees if provided
-    if ($request->filled('employee_ids')) {
-        $task->employees()->sync($request->employee_ids);
+    // ✅ Check if all employees have completed → then mark global task as completed
+    $allCompleted = $task->employees()->wherePivot('status', '!=', 'completed')->count() === 0;
+    if ($allCompleted) {
+        $task->update(['status' => 'completed']);
     }
 
-    // ✅ Save base64 photos
+    // ✅ Save base64 photos (global for the task)
     if ($request->filled('photo_base64')) {
-        $existingBase64 = $task->photos ?? []; // Assuming it's casted to array
+        $existingBase64 = $task->photos ?? [];
         $mergedBase64 = array_merge($existingBase64, $request->photo_base64);
-
-        $task->update([
-            'photos' => $mergedBase64,
-        ]);
+        $task->update(['photos' => $mergedBase64]);
     }
 
-    // ✅ Send push notification when completed
+    // ✅ Notifications when employee completes
     if ($request->status === 'completed') {
         $fcm = new FcmNotificationService();
 
-        // 1. Notify Admin
+        // Notify Admin
         $admin = Employee::where('role', 'admin')->first();
         if ($admin && $admin->device_token) {
             $fcm->sendAndSave(
@@ -188,7 +214,7 @@ public function updateTaskStatus(Request $request, Task $task)
             );
         }
 
-        // 2. Notify Task Creator (assigned_by in pivot)
+        // Notify Task Creator
         $creatorId = $task->employees()
             ->wherePivot('employee_id', $employee->id)
             ->pluck('task_assignments.assigned_by')
@@ -212,12 +238,13 @@ public function updateTaskStatus(Request $request, Task $task)
 
     return response()->json([
         'status' => 'success',
-        'message' => 'Task updated successfully.',
+        'message' => 'Task status updated successfully.',
         'data' => [
             'task' => $task->load('employees'),
         ],
     ]);
 }
+
 
 
 
@@ -239,6 +266,7 @@ public function updateTaskStatus(Request $request, Task $task)
             'description' => $request->description,
             'type' => $request->type,
             'deadline' => $request->deadline,
+            'created_by'  => auth()->id(),
             'status' => 'pending'
         ]);
 
@@ -265,92 +293,126 @@ public function updateTaskStatus(Request $request, Task $task)
             'data' => ['task' => $task->load('employees')]
         ], 201);
     }
-    public function index(Request $request)
-    {
-        $query = Task::query();
-    
-        if ($request->type) {
-            $query->where('type', $request->type);
-        }
-    
-        if ($request->status) {
-            $query->where('status', $request->status);
-        }
-    
-        $tasks = $query->with('employees')
-               ->orderBy('created_at', 'desc')
-               ->get();
-    
-        // Update expired tasks and increment counter
-        foreach ($tasks as $task) {
-            if ($task->status === 'pending' && $task->deadline < Carbon::now()->subHour(-1)) {
-                // Task expired before 1 hour, send notification to employees
-                foreach ($task->employees as $employee) {
-                    if ($employee->device_token) {
-                        $fcm = new FcmNotificationService();
-                        $fcm->sendAndSave(
-                            'Task Expiring Today',
-                            "Your task '{$task->name}' is expiring today (Deadline: " . Carbon::parse(
-                                $task->deadline
-                            )->format('d M Y h:i A') . ")",
-                            'task_expired',
-                            $employee->id,
-                            'employee',
-                            $employee->device_token,
-                            ['task_id' => $task->id]
-                        );
-                    }
-                }
-                $task->update([
-                    'status' => 'expired',
-                    'expired_count' => $task->expired_count + 1
-                ]);
-            }
-        }
-    
-        return response()->json([
-            'status' => 'success',
-            'data' => ['tasks' => $tasks]
-        ]);
+
+public function index(Request $request)
+{
+    $query = Task::query();
+
+    if ($request->type) {
+        $query->where('type', $request->type);
     }
+
+    if ($request->status) {
+        $query->where('status', $request->status);
+    }
+
+    $tasks = $query->with('employees') // eager load employees
+        ->orderBy('created_at', 'desc')
+        ->get();
+
+    // Update expired tasks & increment counter
+    foreach ($tasks as $task) {
+        if ($task->status === 'pending' && $task->deadline && $task->deadline->lt(Carbon::now())) {
+
+            foreach ($task->employees as $employee) {
+                if ($employee->device_token) {
+                    $fcm = new FcmNotificationService();
+                    $fcm->sendAndSave(
+                        'Task Expired',
+                        "Your task '{$task->name}' expired (Deadline: " . $task->deadline->format('d M Y h:i A') . ")",
+                        'task_expired',
+                        $employee->id,
+                        'employee',
+                        $employee->device_token,
+                        ['task_id' => $task->id]
+                    );
+                }
+
+                // ✅ Update pivot status
+                $task->assignments()
+                    ->where('employee_id', $employee->id)
+                    ->update(['status' => 'expired']);
+            }
+
+            $task->update([
+                'status' => 'expired',
+                'expired_count' => $task->expired_count + 1
+            ]);
+        }
+    }
+
+    // ✅ Format response
+    $formattedTasks = $tasks->map(function ($task) {
+        return [
+            'task_id'     => $task->id,
+            'name'        => $task->name,
+            'description' => $task->description,
+            'type'        => $task->type,
+            'status'      => $task->status,
+            'created_by' => $task->created_by,
+            'deadline'    => $task->deadline ? $task->deadline->format('Y-m-d H:i:s') : null,
+            'expired_count' => $task->expired_count,
+            'employees'   => $task->employees->map(function ($emp) {
+                return [
+                    'id'     => $emp->id,
+                    'name'   => $emp->name,
+                    'email'  => $emp->email,
+                    'status' => $emp->pivot->status,   // 👈 pivot status
+                    'assigned_by' => $emp->pivot->assigned_by,
+                ];
+            })
+        ];
+    });
+
+    return response()->json([
+        'status' => 'success',
+        'data'   => ['tasks' => $formattedTasks]
+    ]);
+}
     
 
-  public function store(Request $request)
+public function store(Request $request)
 {
     $request->validate([
-        'name' => 'required|string|max:255',
-        'description' => 'required|string',
-        'type' => 'required|in:daily,weekly,monthly,yearly,once',
-        'deadline' => 'required|date|after:now',
+        'name'         => 'required|string|max:255',
+        'description'  => 'required|string',
+        'type'         => 'required|in:daily,weekly,monthly,yearly,once',
+        'deadline'     => 'required|date|after:now',
         'employee_ids' => 'required|array',
         'employee_ids.*' => 'exists:employees,id'
     ]);
 
+    // Create task
     $task = Task::create([
-        'name' => $request->name,
+        'name'        => $request->name,
         'description' => $request->description,
-        'type' => $request->type,
-        'deadline' => $request->deadline,
-        'status' => 'pending'
+        'type'        => $request->type,
+        'deadline'    => $request->deadline,
+        'created_by'  => auth()->id(),
+        'status'      => 'pending'
     ]);
 
     $assignedById = $request->user()->id ?? null;
 
-    // Attach employees with assigned_by in pivot
+    // Attach employees with assigned_by & default pivot status
     $attachData = [];
     foreach ($request->employee_ids as $employeeId) {
-        $attachData[$employeeId] = ['assigned_by' => $assignedById];
+        $attachData[$employeeId] = [
+            'assigned_by' => $assignedById,
+            'status'      => 'pending'   // default pivot status
+        ];
     }
-
     $task->employees()->attach($attachData);
 
     // Send push notifications
     $fcm = new FcmNotificationService();
     $employees = Employee::whereIn('id', $request->employee_ids)->get();
+
     foreach ($employees as $employee) {
         if ($employee->device_token) {
             $assignerName = $request->user() ? $request->user()->name : 'Someone';
             $body = $assignerName . " has assigned you the task '{$task->name}'";
+
             $fcm->sendAndSave(
                 'New Task Assigned',
                 $body,
@@ -364,70 +426,121 @@ public function updateTaskStatus(Request $request, Task $task)
     }
 
     return response()->json([
-        'status' => 'success',
+        'status'  => 'success',
         'message' => 'Task created successfully',
-        'data' => ['task' => $task->load('employees')]
+        'data'    => [
+            'task' => $task->load('employees') // load employees with pivot data
+        ]
     ], 201);
 }
 
 
-    public function show(Task $task)
-    {
-        return response()->json([
-            'status' => 'success',
-            'data' => ['task' => $task->load('employees')]
-        ]);
-    }
+  public function show(Task $task)
+{
+    $task->load('employees');
+
+    $formattedTask = [
+        'task_id'     => $task->id,
+        'name'        => $task->name,
+        'description' => $task->description,
+        'type'        => $task->type,
+        'created_by' => $task->created_by,
+        'photos' => $task->photos,
+        'status'      => $task->status,  // overall task status
+        'deadline'    => $task->deadline ? $task->deadline->format('Y-m-d H:i:s') : null,
+        'expired_count' => $task->expired_count,
+        'employees'   => $task->employees->map(function ($emp) {
+            return [
+                'id'            => $emp->id,
+                'name'          => $emp->name,
+                'email'         => $emp->email,
+                'status' => $emp->pivot->status,  
+                'assigned_by'   => $emp->pivot->assigned_by,
+                'assigned_at'   => $emp->pivot->created_at ? $emp->pivot->created_at->format('Y-m-d H:i:s') : null,
+            ];
+        }),
+    ];
+
+    return response()->json([
+        'status' => 'success',
+        'data'   => ['task' => $formattedTask]
+    ]);
+}
+
     
     
 public function update(Request $request, Task $task)
 {
     $request->validate([
-        'type' => 'nullable|string|max:255',
-        'status' => 'required|in:pending,completed,expired',
-        'deadline' => 'nullable|date|after_or_equal:now',
+        'name'         => 'nullable|string|max:255',
+        'description'  => 'nullable|string',
+        'type'         => 'nullable|string|in:daily,weekly,monthly,yearly,once',
+        'deadline'     => 'nullable|date|after_or_equal:now',
+        'status'       => 'nullable|in:pending,completed,expired,requested',
         'employee_ids' => 'nullable|array',
         'employee_ids.*' => 'exists:employees,id',
     ]);
 
-    // Update the task fields
+    // ✅ Update main task fields
     $task->update([
-        'type' => $request->type,
-        'status' => $request->status,
-        'deadline' => $request->deadline,
+        'name'        => $request->name ?? $task->name,
+        'description' => $request->description ?? $task->description,
+        'type'        => $request->type ?? $task->type,
+        'deadline'    => $request->deadline ?? $task->deadline,
     ]);
 
-    // Sync employees if provided
+    // ✅ Sync employees if provided
     if ($request->filled('employee_ids')) {
-        $task->employees()->sync($request->employee_ids);
+        $syncData = [];
+        foreach ($request->employee_ids as $empId) {
+            $syncData[$empId] = [
+                'assigned_by' => $request->user()->id,
+                'status' => 'pending', // reset pivot status
+            ];
+        }
+        $task->employees()->sync($syncData);
     }
 
-    // ✅ Always send notification on task update
-    foreach ($task->employees as $emp) {
-        if ($emp->pivot && $emp->pivot->assigned_by) {
-            $assignedBy = Employee::find($emp->pivot->assigned_by);
+    // ✅ Update pivot status for all employees if status passed
+    if ($request->filled('status')) {
+        foreach ($task->employees as $emp) {
+            $task->employees()->updateExistingPivot($emp->id, [
+                'status' => $request->status,
+            ]);
+        }
 
-            if ($assignedBy) {
-                $title = 'Task Updated';
-                $message = "The task '{$task->name}' assigned to {$emp->name} has been updated. Current status: {$task->status}.";
-
-                // Save notification in DB
-                Notification::create([
-                    'employee_id' => $assignedBy->id,
-                    'title' => $title,
-                    'message' => $message,
-                    'type' => 'task_update',
-                ]);
-
-                // Send FCM push notification
-                if ($assignedBy->device_token) {
-                    sendFCMNotification(
-                        $assignedBy->device_token,
-                        $title,
-                        $message
-                    );
-                }
+        // Update global task status if all completed
+        if ($request->status === 'completed') {
+            $allCompleted = $task->employees()->wherePivot('status', '!=', 'completed')->count() === 0;
+            if ($allCompleted) {
+                $task->update(['status' => 'completed']);
             }
+        } elseif ($request->status === 'expired') {
+            $task->update(['status' => 'expired']);
+        } else {
+            $task->update(['status' => 'pending']);
+        }
+    }
+
+    // ✅ Notify all assigned employees
+    $fcm = new FcmNotificationService();
+    foreach ($task->employees as $emp) {
+        $title = 'Task Updated';
+        $message = "The task '{$task->name}' assigned to you has been updated. Current status: " .
+                   ($emp->pivot->status ?? $task->status) . ".";
+
+
+        // Send FCM push notification
+        if ($emp->device_token) {
+            $fcm->sendAndSave(
+                $title,
+                $message,
+                'task_update',
+                $emp->id,
+                'employee',
+                $emp->device_token,
+                ['task_id' => $task->id]
+            );
         }
     }
 
@@ -441,30 +554,63 @@ public function update(Request $request, Task $task)
 }
 
 
+
+
 public function updateStatusAdmin(Request $request, Task $task)
 {
     $request->validate([
         'status' => 'required|in:pending,completed,expired',
-        'deadline' => 'required|date|after:now', // accepts full timestamp
+        'deadline' => 'required|date|after:now',
     ]);
 
     $previousStatus = $task->status;
 
+    // ✅ Update deadline
     $task->update([
-        'status' => $request->status,
         'deadline' => $request->deadline,
     ]);
 
-    // Increment expired_count only when status is changed from expired to something else
+    // ✅ Update pivot statuses for all employees
+    foreach ($task->employees as $emp) {
+        $task->employees()->updateExistingPivot($emp->id, [
+            'status' => $request->status,
+        ]);
+    }
+
+    // ✅ If admin sets global status → update main task status
+    $task->update(['status' => $request->status]);
+
+    // ✅ Increment expired_count only when moving out of expired
     if ($previousStatus === 'expired' && $request->status !== 'expired') {
         $task->increment('expired_count');
     }
 
+    // ✅ Notify employees about status change
+    foreach ($task->employees as $emp) {
+        $title = 'Task Status Updated';
+        $message = "The task '{$task->name}' status has been changed to {$request->status} by Admin.";
+
+        Notification::create([
+            'recipient_id' => $emp->id,
+            'title' => $title,
+            'body' => $message,
+            'recipient_type' => 'task_update_admin',
+        ]);
+
+        if ($emp->device_token) {
+            sendFCMNotification(
+                $emp->device_token,
+                $title,
+                $message
+            );
+        }
+    }
+
     return response()->json([
         'status' => 'success',
-        'message' => 'Task status and deadline updated successfully',
+        'message' => 'Task status and deadline updated successfully by admin',
         'data' => [
-            'task' => $task,
+            'task' => $task->load('employees'),
         ],
     ]);
 }
@@ -474,25 +620,37 @@ public function updateStatusAdmin(Request $request, Task $task)
 
 
 
-    public function statistics()
-    {
-        $stats = [
-            'once' => Task::where('type', 'once')->count(),
-            'daily' => Task::where('type', 'daily')->count(),
-            'weekly' => Task::where('type', 'weekly')->count(),
-            'monthly' => Task::where('type', 'monthly')->count(),
-            'yearly' => Task::where('type', 'yearly')->count(),
-            'pending' => Task::where('status', 'pending')->count(),
-            'completed' => Task::where('status', 'completed')->count(),
-            'expired' => Task::where('status', 'expired')->count(),
-             'requested' => Task::where('status', 'requested')->count(),
-        ];
 
-        return response()->json([
-            'status' => 'success',
-            'data' => ['statistics' => $stats]
-        ]);
-    }
+  public function statistics()
+{
+    // Count by type
+    $typeCounts = Task::select('type', DB::raw('COUNT(*) as total'))
+        ->groupBy('type')
+        ->pluck('total', 'type');
+
+    // Count by status
+    $statusCounts = Task::select('status', DB::raw('COUNT(*) as total'))
+        ->groupBy('status')
+        ->pluck('total', 'status');
+
+    // Merge into final stats
+    $stats = [
+        'once'     => $typeCounts['once'] ?? 0,
+        'daily'    => $typeCounts['daily'] ?? 0,
+        'weekly'   => $typeCounts['weekly'] ?? 0,
+        'monthly'  => $typeCounts['monthly'] ?? 0,
+        'yearly'   => $typeCounts['yearly'] ?? 0,
+        'pending'  => $statusCounts['pending'] ?? 0,
+        'completed'=> $statusCounts['completed'] ?? 0,
+        'expired'  => $statusCounts['expired'] ?? 0,
+        'requested'=> $statusCounts['requested'] ?? 0,
+    ];
+
+    return response()->json([
+        'status' => 'success',
+        'data'   => ['statistics' => $stats]
+    ]);
+}
     
 public function allEmployees()
 {
@@ -629,102 +787,109 @@ public function downloadTaskReport(Request $request)
             'data' => $location
         ]);
     }
-    public function taskReportAdmin(Request $request)
-    {
-        $request->validate([
-            'from_date' => 'required|date',
-            'to_date' => 'required|date|after_or_equal:from_date',
-            'employee_id' => 'required|exists:employees,id',
-        ]);
-    
-        $from = Carbon::parse($request->from_date)->startOfDay();
-        $to = Carbon::parse($request->to_date)->endOfDay();
-        $employeeId = $request->employee_id;
-    
-        $now = now();
-        $endOfMonth = $now->copy()->endOfMonth();
-    
-        // Base query for tasks assigned to the employee in the date range
-        $taskQuery = Task::whereHas('employees', function ($query) use ($employeeId) {
-            $query->where('task_assignments.employee_id', $employeeId);
-        })->whereBetween('created_at', [$from, $to]);
-    
-        // Clone queries for counts
-        $pending = (clone $taskQuery)->where('status', 'pending')->count();
-        $completed = (clone $taskQuery)->where('status', 'completed')->count();
-        $expired = (clone $taskQuery)->where('status', 'expired')->count();
-        $requested = (clone $taskQuery)->where('status', 'requested')->count();
-    
-        // Reset completed count if to_date is at or after end of month
-        if ($to->gte($endOfMonth)) {
-            $completed = 0;
-        }
-    
-        // Get all matching task details with assigned employees
-        $allTasks = $taskQuery->with('employees:id,name')->get();
-    
-        return response()->json([
-            'status' => 'success',
-            'data' => [
-                'from_date' => $from->toDateString(),
-                'to_date' => $to->toDateString(),
-                'employee_id' => $employeeId,
-                'pending_tasks' => $pending,
-                'completed_tasks' => $completed,
-                'expired_tasks' => $expired,
-                'requested_tasks' => $requested,
-                'tasks' => $allTasks,
-            ],
-        ]);
-    }
-
-    public function taskReportEmployee(Request $request)
+public function taskReportAdmin(Request $request)
 {
     $request->validate([
-        'from_date' => 'required|date',
-        'to_date' => 'required|date|after_or_equal:from_date',
+        'from_date'   => 'required|date',
+        'to_date'     => 'required|date|after_or_equal:from_date',
+        'employee_id' => 'required|exists:employees,id',
     ]);
 
-    $employee = $request->user();
-    $employeeId = $employee->id;
+    $from       = Carbon::parse($request->from_date)->startOfDay();
+    $to         = Carbon::parse($request->to_date)->endOfDay();
+    $employeeId = $request->employee_id;
 
-    $from = Carbon::parse($request->from_date)->startOfDay();
-    $to = Carbon::parse($request->to_date)->endOfDay();
-    $now = now();
+    $now        = now();
     $endOfMonth = $now->copy()->endOfMonth();
 
-    // Base query for tasks assigned to the employee in the date range
+    // Base query → only tasks assigned to this employee within the date range
     $taskQuery = Task::whereHas('employees', function ($query) use ($employeeId) {
         $query->where('task_assignments.employee_id', $employeeId);
     })->whereBetween('created_at', [$from, $to]);
 
-    // Clone queries for status-wise counts
-    $pending = (clone $taskQuery)->where('status', 'pending')->count();
-    $completed = (clone $taskQuery)->where('status', 'completed')->count();
-    $expired = (clone $taskQuery)->where('status', 'expired')->count();
-    $requested = (clone $taskQuery)->where('status', 'requested')->count();
+    // ✅ Count statuses from pivot table (task_assignments)
+    $pending   = (clone $taskQuery)->whereHas('employees', fn($q) => $q->where('task_assignments.status', 'pending'))->count();
+    $completed = (clone $taskQuery)->whereHas('employees', fn($q) => $q->where('task_assignments.status', 'completed'))->count();
+    $expired   = (clone $taskQuery)->whereHas('employees', fn($q) => $q->where('task_assignments.status', 'expired'))->count();
+    $requested = (clone $taskQuery)->whereHas('employees', fn($q) => $q->where('task_assignments.status', 'requested'))->count();
 
-    // Reset completed if to_date is end of month or beyond
+    // Reset completed count if to_date >= end of month
     if ($to->gte($endOfMonth)) {
         $completed = 0;
     }
 
-    // Get detailed tasks
-    $tasks = $taskQuery->with('employees:id,name')->get();
+    // Get task details with assigned employees and pivot data
+    $allTasks = $taskQuery->with(['employees' => function ($q) use ($employeeId) {
+        $q->where('task_assignments.employee_id', $employeeId)
+          ->select('employees.id', 'employees.name');
+    }])->get();
 
     return response()->json([
         'status' => 'success',
         'data' => [
-            'from_date' => $from->toDateString(),
-            'to_date' => $to->toDateString(),
-            'pending_tasks' => $pending,
+            'from_date'       => $from->toDateString(),
+            'to_date'         => $to->toDateString(),
+            'employee_id'     => $employeeId,
+            'pending_tasks'   => $pending,
             'completed_tasks' => $completed,
-            'expired_tasks' => $expired,
+            'expired_tasks'   => $expired,
             'requested_tasks' => $requested,
-            'tasks' => $tasks,
+            'tasks'           => $allTasks,
         ],
     ]);
 }
+
+public function taskReportEmployee(Request $request)
+{
+    $request->validate([
+        'from_date' => 'required|date',
+        'to_date'   => 'required|date|after_or_equal:from_date',
+    ]);
+
+    $employee   = $request->user();
+    $employeeId = $employee->id;
+
+    $from       = Carbon::parse($request->from_date)->startOfDay();
+    $to         = Carbon::parse($request->to_date)->endOfDay();
+    $now        = now();
+    $endOfMonth = $now->copy()->endOfMonth();
+
+    // Base query → only tasks assigned to this employee within date range
+    $taskQuery = Task::whereHas('employees', function ($query) use ($employeeId) {
+        $query->where('task_assignments.employee_id', $employeeId);
+    })->whereBetween('created_at', [$from, $to]);
+
+    // ✅ Count statuses from pivot (task_assignments)
+    $pending   = (clone $taskQuery)->whereHas('employees', fn($q) => $q->where('task_assignments.status', 'pending'))->count();
+    $completed = (clone $taskQuery)->whereHas('employees', fn($q) => $q->where('task_assignments.status', 'completed'))->count();
+    $expired   = (clone $taskQuery)->whereHas('employees', fn($q) => $q->where('task_assignments.status', 'expired'))->count();
+    $requested = (clone $taskQuery)->whereHas('employees', fn($q) => $q->where('task_assignments.status', 'requested'))->count();
+
+    // Reset completed count at month end
+    if ($to->gte($endOfMonth)) {
+        $completed = 0;
+    }
+
+    // Get detailed tasks with employee pivot info
+    $tasks = $taskQuery->with(['employees' => function ($q) use ($employeeId) {
+        $q->where('task_assignments.employee_id', $employeeId)
+          ->select('employees.id', 'employees.name');
+    }])->get();
+
+    return response()->json([
+        'status' => 'success',
+        'data' => [
+            'from_date'       => $from->toDateString(),
+            'to_date'         => $to->toDateString(),
+            'pending_tasks'   => $pending,
+            'completed_tasks' => $completed,
+            'expired_tasks'   => $expired,
+            'requested_tasks' => $requested,
+            'tasks'           => $tasks,
+        ],
+    ]);
+}
+
 
 public function employeeNotificationList(Request $request)
 {

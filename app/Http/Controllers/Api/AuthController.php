@@ -94,15 +94,21 @@ class AuthController extends Controller
         ]);
     }
 
-    public function profile(Request $request)
-    {
-        return response()->json([
-            'status' => 'success',
-            'data' => [
-                'employee' => $request->user()
-            ]
-        ]);
-    }
+public function profile(Request $request)
+{
+    $employee = $request->user();
+
+    // Hide unwanted fields
+    $employee->makeHidden(['status', 'assigned_by']);
+
+    return response()->json([
+        'status' => 'success',
+        'data' => [
+            'employee' => $employee
+        ]
+    ]);
+}
+
     
    public function deleteEmployee(Employee $employee)
 {

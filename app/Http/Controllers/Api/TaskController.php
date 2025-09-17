@@ -585,23 +585,20 @@ public function updateStatusAdmin(Request $request, Task $task)
         $task->increment('expired_count');
     }
 
+    // ✅ Initialize FCM service
+    $fcm = new FcmNotificationService();
+
     // ✅ Notify employees about status change
     foreach ($task->employees as $emp) {
-        $title = 'Task Status Updated';
-        $message = "The task '{$task->name}' status has been changed to {$request->status} by Admin.";
-
-        Notification::create([
-            'recipient_id' => $emp->id,
-            'title' => $title,
-            'body' => $message,
-            'recipient_type' => 'task_update_admin',
-        ]);
-
         if ($emp->device_token) {
-            sendFCMNotification(
+            $fcm->sendAndSave(
+                'Task Status Updated',
+                "The task '{$task->name}' status has been changed to {$request->status} by Admin.",
+                'task_status_updated',
+                $emp->id,
+                'employee',
                 $emp->device_token,
-                $title,
-                $message
+                ['task_id' => $task->id]
             );
         }
     }

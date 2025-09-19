@@ -6,26 +6,22 @@ use Illuminate\Console\Command;
 use App\Models\Task;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log; // 👈 Add this
 use App\Services\FcmNotificationService;
 
 class ResetExpiredTasks extends Command
 {
-    protected $signature = 'tasks:reset-expired';
-    protected $description = 'Reset expired recurring tasks (employee-wise and globally) with updated deadlines';
+    protected $signature = 'tasks:reset-all';
+    protected $description = 'Reset all recurring tasks (employee-wise and globally) with updated deadlines';
 
     public function handle()
     {
         $fcm = new FcmNotificationService();
         $resetCount = 0;
 
-        // 🔍 Fetch recurring tasks with at least one expired employee
+        // 🔍 Fetch ALL recurring tasks
         $tasks = Task::whereIn('type', ['daily', 'weekly', 'monthly', 'yearly'])
-            ->whereHas('employees', function ($q) {
-                $q->where('task_assignments.status', 'expired');
-            })
-            ->with(['employees' => function ($q) {
-                $q->where('task_assignments.status', 'expired');
-            }])
+            ->with('employees')
             ->get();
 
         foreach ($tasks as $task) {
@@ -47,31 +43,16 @@ class ResetExpiredTasks extends Command
                     continue 2; // skip unknown type
             }
 
+            // ✅ Reset task status globally
+            $task->status = 'pending';
             $task->save();
 
-            // ✅ Reset expired employees (pivot)
+            // ✅ Reset all employees (pivot table)
             DB::table('task_assignments')
                 ->where('task_id', $task->id)
-                ->where('status', 'expired')
                 ->update(['status' => 'pending']);
 
-            // ✅ Check if ALL employees were expired (global reset)
-            $totalAssignments = DB::table('task_assignments')
-                ->where('task_id', $task->id)
-                ->count();
-
-            $expiredAssignments = DB::table('task_assignments')
-                ->where('task_id', $task->id)
-                ->where('status', 'expired')
-                ->count();
-
-            if ($expiredAssignments === $totalAssignments) {
-                // All employees were expired → reset task globally
-                $task->status = 'pending';
-                $task->save();
-            }
-
-            // 🔔 Notify employees whose tasks were reset
+            // 🔔 Notify all employees
             foreach ($task->employees as $employee) {
                 if ($employee->device_token) {
                     $fcm->sendAndSave(
@@ -84,12 +65,30 @@ class ResetExpiredTasks extends Command
                         $employee->device_token,
                         ['task_id' => $task->id]
                     );
+
+                    // 📝 Log employee notification
+                    Log::info("📲 Task reset notification sent", [
+                        'task_id'    => $task->id,
+                        'task_name'  => $task->name,
+                        'employee_id'=> $employee->id,
+                        'deadline'   => $task->deadline->format('Y-m-d H:i')
+                    ]);
                 }
             }
+
+            // 📝 Log task reset
+            Log::info("✅ Task reset", [
+                'task_id'   => $task->id,
+                'task_name' => $task->name,
+                'type'      => $task->type,
+                'deadline'  => $task->deadline->format('Y-m-d H:i')
+            ]);
 
             $resetCount++;
         }
 
-        $this->info("✅ Reset {$resetCount} expired recurring task(s) (employee-wise + globally).");
+        // Final log + console output
+        Log::info("🔄 Total recurring tasks reset", ['count' => $resetCount]);
+        $this->info("✅ Reset {$resetCount} recurring task(s) (all employees + globally).");
     }
 }

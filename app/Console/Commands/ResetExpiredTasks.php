@@ -25,23 +25,24 @@ class ResetExpiredTasks extends Command
             ->get();
 
         foreach ($tasks as $task) {
-            // 🕓 Update deadline based on recurrence type
-            switch ($task->type) {
+           // 🕓 Update deadline based on recurrence type (keep original time)
+              switch ($task->type) {
                 case 'daily':
-                    $task->deadline = Carbon::now()->addDay();
+                    $task->deadline = Carbon::parse($task->deadline)->addDay();
                     break;
                 case 'weekly':
-                    $task->deadline = Carbon::now()->addWeek();
+                    $task->deadline = Carbon::parse($task->deadline)->addWeek();
                     break;
                 case 'monthly':
-                    $task->deadline = Carbon::now()->addMonth();
+                    $task->deadline = Carbon::parse($task->deadline)->addMonth();
                     break;
                 case 'yearly':
-                    $task->deadline = Carbon::now()->addYear();
+                    $task->deadline = Carbon::parse($task->deadline)->addYear();
                     break;
                 default:
                     continue 2; // skip unknown type
             }
+
 
             // ✅ Reset task status globally
             $task->status = 'pending';

@@ -21,7 +21,7 @@ class Kernel extends ConsoleKernel
         // $schedule->command('inspire')->hourly();
          $schedule->command('task:send-expiration-notifications')->everyFiveMinutes();
           // Schedule new task reset command daily at midnight
-        $schedule->command('tasks:reset-expired')->dailyAt('00:00');
+        $schedule->command('tasks:reset-all')->dailyAt('00:00');
     }
 
     /**

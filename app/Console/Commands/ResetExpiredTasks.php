@@ -21,8 +21,12 @@ class ResetExpiredTasks extends Command
 
         // 🔍 Fetch ALL recurring tasks
         $tasks = Task::whereIn('type', ['daily', 'weekly', 'monthly', 'yearly'])
-            ->with('employees')
-            ->get();
+        ->where('status', '!=', 'pending') // ✅ Exclude pending tasks
+        ->with(['employees' => function ($q) {
+            $q->where('task_assignments.status', '!=', 'pending'); // ✅ Exclude employees still pending
+        }])
+        ->get();
+    
 
         foreach ($tasks as $task) {
            // 🕓 Update deadline based on recurrence type (keep original time)

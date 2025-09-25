@@ -72,7 +72,7 @@ class SendTaskExpirationNotifications extends Command
                 ->whereNotIn('status', ['expired', 'completed'])
                 ->count();
 
-            if ($activeCount === 0) {
+            if ($activeCount === 0 && $task->status !== 'expired') {
                 $task->update([
                     'status' => 'expired',
                     'expired_count' => $task->expired_count + 1,

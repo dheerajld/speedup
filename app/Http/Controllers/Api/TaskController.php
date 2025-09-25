@@ -590,7 +590,7 @@ public function updateStatusAdmin(Request $request, Task $task)
     $task->update(['status' => $request->status]);
 
     // ✅ Increment expired_count only when moving out of expired
-    if ($previousStatus === 'expired' && $request->status !== 'expired') {
+    if ($previousStatus !== 'expired' && $request->status === 'expired') {
         $task->increment('expired_count');
     }
 

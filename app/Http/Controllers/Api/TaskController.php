@@ -338,9 +338,9 @@ public function index(Request $request)
                 }
 
                 // ✅ Update pivot status
-                $task->assignments()
-                    ->where('employee_id', $employee->id)
-                    ->update(['status' => 'expired']);
+              $task->employees()->updateExistingPivot($employee->id, [
+                    'status' => 'expired',
+                ]);
             }
 
             $task->update([

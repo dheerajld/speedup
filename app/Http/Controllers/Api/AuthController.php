@@ -21,7 +21,7 @@ class AuthController extends Controller
             'employee_id' => 'required|string|max:50|unique:employees',
             'username' => 'required|string|max:50|unique:employees',
             'password' => 'required|string|min:8',
-            'role' => 'required|in:admin,employee',
+            'role' => 'required|in:admin,employee,super_admin',
             'image' => 'nullable|image|max:2048'
         ]);
 

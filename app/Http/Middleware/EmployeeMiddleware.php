@@ -9,7 +9,9 @@ class EmployeeMiddleware
 {
     public function handle(Request $request, Closure $next)
     {
-        if (!$request->user() || !$request->user()->isEmployee()) {
+        $user = $request->user();
+
+        if (!$user || !in_array($user->role, ['employee', 'admin', 'super_admin'])) {
             return response()->json([
                 'status' => 'error',
                 'message' => 'Unauthorized. Employee access required.'

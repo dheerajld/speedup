@@ -120,17 +120,17 @@ public function employeeDashboard(Request $request)
 
 
 
- public function employeeTasks(Request $request)
+public function employeeTasks(Request $request)
 {
     $employee = $request->user();
 
     $tasks = $employee->tasks()
-        ->with('employees:id,name') // load other employees' names
+        ->with('employees:id,name') // load employees without email
         ->when($request->type, function ($query, $type) {
             return $query->where('type', $type);
         })
         ->when($request->status, function ($query, $status) use ($employee) {
-            // ✅ Filter by pivot status instead of global task status
+            // Filter by pivot status for current employee
             return $query->whereHas('employees', function ($q) use ($employee, $status) {
                 $q->where('employee_id', $employee->id)
                   ->where('task_assignments.status', $status);
@@ -142,14 +142,20 @@ public function employeeDashboard(Request $request)
             return [
                 'task_no'      => $task->id,
                 'name'         => $task->name,
-                 'photos' => $task->photos,
                 'description'  => $task->description,
-                'created_by' => $task->created_by,
+                'created_by'   => $task->created_by,
                 'assigned_date'=> $task->created_at->format('Y-m-d H:i:s'),
                 'deadline'     => $task->deadline ? $task->deadline->format('Y-m-d H:i:s') : null,
-                'status'       => $task->employees->where('id', $employee->id)->first()?->pivot->status, // 👈 employee-specific
+                'status'       => $task->employees->where('id', $employee->id)->first()?->pivot->status,
                 'type'         => $task->type,
-                'assigned_to'  => $task->employees->pluck('name'),
+                'assigned_to'  => $task->employees->map(function ($emp) {
+                    return [
+                        'id'          => $emp->id,
+                        'name'        => $emp->name,
+                        'status'      => $emp->pivot->status,
+                        'assigned_by' => $emp->pivot->assigned_by,
+                    ];
+                }),
             ];
         });
 
@@ -158,6 +164,7 @@ public function employeeDashboard(Request $request)
         'data' => ['tasks' => $tasks]
     ]);
 }
+
 
 
 public function updateTaskStatus(Request $request, Task $task)
@@ -201,18 +208,20 @@ public function updateTaskStatus(Request $request, Task $task)
         $fcm = new FcmNotificationService();
 
         // Notify Admin
-        $admin = Employee::where('role', 'admin')->first();
-        if ($admin && $admin->device_token) {
+         $admins = Employee::whereIn('role', ['admin', 'super_admin'])->get();
+    foreach ($admins as $admin) {
+        if ($admin->device_token) {
             $fcm->sendAndSave(
                 'Task Completed',
                 'Task #' . $task->id . ' has been completed by ' . $employee->name,
                 'task_completed',
                 $admin->id,
-                'admin',
+                $admin->role,
                 $admin->device_token,
                 ['task_id' => $task->id]
             );
         }
+    }
 
         // Notify Task Creator
         $creatorId = $task->employees()

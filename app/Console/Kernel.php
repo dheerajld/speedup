@@ -13,7 +13,11 @@ class Kernel extends ConsoleKernel
      
      protected $commands = [
         \App\Console\Commands\SendTaskExpirationNotifications::class,
-         \App\Console\Commands\ResetExpiredTasks::class,
+        //  \App\Console\Commands\ResetExpiredTasks::class,
+          \App\Console\Commands\ResetDailyTasks::class,
+        \App\Console\Commands\ResetWeeklyTasks::class,
+        \App\Console\Commands\ResetMonthlyTasks::class,
+        \App\Console\Commands\ResetYearlyTasks::class,
     ];
      
     protected function schedule(Schedule $schedule): void
@@ -21,7 +25,13 @@ class Kernel extends ConsoleKernel
         // $schedule->command('inspire')->hourly();
          $schedule->command('task:send-expiration-notifications')->everyFiveMinutes();
           // Schedule new task reset command daily at midnight
-        $schedule->command('tasks:reset-all')->dailyAt('00:00');
+        // $schedule->command('tasks:reset-all')->dailyAt('00:00');
+           // 🕓 Recurring task resets by type
+        $schedule->command('tasks:reset-daily')->dailyAt('00:00');
+        $schedule->command('tasks:reset-weekly')->weeklyOn(0, '00:00'); // Sunday
+        $schedule->command('tasks:reset-monthly')->monthlyOn(1, '00:00'); // 1st of month
+        $schedule->command('tasks:reset-yearly')->yearlyOn(1, 1, '00:00'); // Jan 1
+        
     }
 
     /**

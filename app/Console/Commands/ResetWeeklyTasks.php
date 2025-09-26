@@ -16,21 +16,34 @@ class ResetWeeklyTasks extends Command
     public function handle()
     {
         $fcm = new FcmNotificationService();
-        $tasks = Task::where('type', 'weekly')->where('status', '!=', 'pending')->with(['employees'])->get();
+        $today = Carbon::today();
         $resetCount = 0;
 
+        // ✅ Only reset weekly tasks that are due this week or earlier
+        $tasks = Task::where('type', 'weekly')
+            ->whereDate('deadline', '<=', $today)
+            ->where('status', '!=', 'pending')
+            ->with(['employees'])
+            ->get();
+
         foreach ($tasks as $task) {
-            $task->deadline = Carbon::parse($task->deadline)->addWeek();
+            // set new deadline → next week same weekday end of day
+            $task->deadline = $today->copy()->addWeek()->endOfDay();
             $task->status = 'pending';
             $task->save();
 
-            DB::table('task_assignments')->where('task_id', $task->id)->update(['status' => 'pending']);
+            // reset all task assignments
+            DB::table('task_assignments')
+                ->where('task_id', $task->id)
+                ->update(['status' => 'pending']);
 
+            // send push notification to employees
             foreach ($task->employees as $employee) {
                 if ($employee->device_token) {
                     $fcm->sendAndSave(
                         'Weekly Task Reset',
-                        "Your weekly task '{$task->name}' has been reset. New deadline: " . $task->deadline->format('Y-m-d H:i'),
+                        "Your weekly task '{$task->name}' has been reset. New deadline: " 
+                            . $task->deadline->format('Y-m-d H:i'),
                         'task_reset',
                         $employee->id,
                         'employee',

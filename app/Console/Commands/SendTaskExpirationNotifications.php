@@ -17,18 +17,29 @@ class SendTaskExpirationNotifications extends Command
     {
         $now = Carbon::now();
         $oneHourFromNow = $now->copy()->addHour();
-
         $fcm = new FcmNotificationService();
-        $notificationCount = 0;
 
-        // 🔔 1. Notify employees with tasks expiring within 1 hour
-        $tasksToNotify = Task::with(['employees' => function ($q) {
+        $notificationCount = $this->sendExpiringSoonNotifications($fcm, $now, $oneHourFromNow);
+        $this->info("✅ Sent {$notificationCount} expiring task notification(s).");
+
+        $expiredCount = $this->expireOverdueTasks($now);
+        $this->info("🕓 Marked {$expiredCount} employee-task(s) as expired.");
+    }
+
+    /**
+     * 🔔 Notify employees for tasks expiring within 1 hour
+     */
+    private function sendExpiringSoonNotifications(FcmNotificationService $fcm, $now, $oneHourFromNow): int
+    {
+        $tasks = Task::with(['employees' => function ($q) {
                 $q->wherePivot('status', 'pending');
             }])
             ->whereBetween('deadline', [$now, $oneHourFromNow])
             ->get();
 
-        foreach ($tasksToNotify as $task) {
+        $count = 0;
+
+        foreach ($tasks as $task) {
             foreach ($task->employees as $employee) {
                 if ($employee->device_token) {
                     $fcm->sendAndSave(
@@ -41,32 +52,39 @@ class SendTaskExpirationNotifications extends Command
                         $employee->device_token,
                         ['task_id' => $task->id]
                     );
-                    $notificationCount++;
+                    $count++;
                 }
             }
         }
 
-        $this->info("✅ Sent {$notificationCount} expiring task notifications.");
+        return $count;
+    }
 
-        // 🕓 2. Expire overdue employee-task assignments
-        $expiredTasks = Task::with(['employees' => function ($q) {
+    /**
+     * 🕓 Expire overdue tasks (employee-wise and globally if needed)
+     */
+    private function expireOverdueTasks($now): int
+    {
+        $tasks = Task::with(['employees' => function ($q) {
                 $q->whereIn('task_assignments.status', ['pending', 'requested']);
             }])
             ->where('deadline', '<', $now)
             ->get();
 
-        $expiredCount = 0;
+        $expiredAssignments = 0;
 
-        foreach ($expiredTasks as $task) {
-            foreach ($task->employees as $employee) {
+        foreach ($tasks as $task) {
+            if ($task->employees->isNotEmpty()) {
+                // expire all employee assignments
                 DB::table('task_assignments')
                     ->where('task_id', $task->id)
-                    ->where('employee_id', $employee->id)
+                    ->whereIn('status', ['pending', 'requested'])
                     ->update(['status' => 'expired']);
-                $expiredCount++;
+
+                $expiredAssignments += $task->employees->count();
             }
 
-            // If no active employees left → expire task globally
+            // check if any active assignments remain
             $activeCount = DB::table('task_assignments')
                 ->where('task_id', $task->id)
                 ->whereNotIn('status', ['expired', 'completed'])
@@ -75,11 +93,11 @@ class SendTaskExpirationNotifications extends Command
             if ($activeCount === 0 && $task->status !== 'expired') {
                 $task->update([
                     'status' => 'expired',
-                    'expired_count' => $task->expired_count + 1,
+                    'expired_count' => DB::raw('expired_count + 1'), // safe increment
                 ]);
             }
         }
 
-        $this->info("🕓 Marked {$expiredCount} employee-task(s) as expired.");
+        return $expiredAssignments;
     }
 }

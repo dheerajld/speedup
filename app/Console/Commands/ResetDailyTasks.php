@@ -17,21 +17,34 @@ class ResetDailyTasks extends Command
     public function handle()
     {
         $fcm = new FcmNotificationService();
-        $tasks = Task::where('type', 'daily')->where('status', '!=', 'pending')->with(['employees'])->get();
+        $today = Carbon::today(); // reference date
         $resetCount = 0;
 
+        // ✅ Only reset tasks that are daily, not pending, and deadline expired or due today
+        $tasks = Task::where('type', 'daily')
+            ->whereDate('deadline', '<=', $today)
+            ->where('status', '!=', 'pending')
+            ->with(['employees'])
+            ->get();
+
         foreach ($tasks as $task) {
-            $task->deadline = Carbon::parse($task->deadline)->addDay();
+            // set deadline to tomorrow end of day
+            $task->deadline = $today->copy()->addDay()->endOfDay();
             $task->status = 'pending';
             $task->save();
 
-            DB::table('task_assignments')->where('task_id', $task->id)->update(['status' => 'pending']);
+            // reset all task assignments
+            DB::table('task_assignments')
+                ->where('task_id', $task->id)
+                ->update(['status' => 'pending']);
 
+            // send notifications to employees
             foreach ($task->employees as $employee) {
                 if ($employee->device_token) {
                     $fcm->sendAndSave(
                         'Daily Task Reset',
-                        "Your daily task '{$task->name}' has been reset. New deadline: " . $task->deadline->format('Y-m-d H:i'),
+                        "Your daily task '{$task->name}' has been reset. New deadline: " 
+                            . $task->deadline->format('Y-m-d H:i'),
                         'task_reset',
                         $employee->id,
                         'employee',

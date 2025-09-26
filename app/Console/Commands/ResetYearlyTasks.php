@@ -16,21 +16,38 @@ class ResetYearlyTasks extends Command
     public function handle()
     {
         $fcm = new FcmNotificationService();
-        $tasks = Task::where('type', 'yearly')->where('status', '!=', 'pending')->with(['employees'])->get();
+        $today = Carbon::today();
         $resetCount = 0;
 
+        // ✅ Only reset yearly tasks that are due today or earlier
+        $tasks = Task::where('type', 'yearly')
+            ->whereDate('deadline', '<=', $today)
+            ->where('status', '!=', 'pending')
+            ->with(['employees'])
+            ->get();
+
         foreach ($tasks as $task) {
-            $task->deadline = Carbon::parse($task->deadline)->addYear();
+            // ✅ Add a year safely (handles leap years)
+            $newDeadline = Carbon::parse($task->deadline)
+                ->addYearNoOverflow()
+                ->endOfDay();
+
+            $task->deadline = $newDeadline;
             $task->status = 'pending';
             $task->save();
 
-            DB::table('task_assignments')->where('task_id', $task->id)->update(['status' => 'pending']);
+            // reset assignments
+            DB::table('task_assignments')
+                ->where('task_id', $task->id)
+                ->update(['status' => 'pending']);
 
+            // notify employees
             foreach ($task->employees as $employee) {
                 if ($employee->device_token) {
                     $fcm->sendAndSave(
                         'Yearly Task Reset',
-                        "Your yearly task '{$task->name}' has been reset. New deadline: " . $task->deadline->format('Y-m-d H:i'),
+                        "Your yearly task '{$task->name}' has been reset. New deadline: " 
+                            . $task->deadline->format('Y-m-d H:i'),
                         'task_reset',
                         $employee->id,
                         'employee',

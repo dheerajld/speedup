@@ -16,12 +16,11 @@ class ResetMonthlyTasks extends Command
     public function handle()
     {
         $fcm = new FcmNotificationService();
-        $today = Carbon::today();
         $resetCount = 0;
 
         // ✅ Only reset monthly tasks that are due today or earlier
         $tasks = Task::where('type', 'monthly')
-            ->whereDate('deadline', '<=', $today)
+            ->whereDate('deadline', '<=', Carbon::now())
             ->where('status', '!=', 'pending')
             ->with(['employees'])
             ->get();

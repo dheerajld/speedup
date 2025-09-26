@@ -17,19 +17,18 @@ class ResetDailyTasks extends Command
     public function handle()
     {
         $fcm = new FcmNotificationService();
-        $today = Carbon::today(); // reference date
         $resetCount = 0;
 
         // ✅ Only reset tasks that are daily, not pending, and deadline expired or due today
         $tasks = Task::where('type', 'daily')
-            ->whereDate('deadline', '<=', $today)
+            ->whereDate('deadline', '<=', Carbon::now())
             ->where('status', '!=', 'pending')
             ->with(['employees'])
             ->get();
 
         foreach ($tasks as $task) {
             // set deadline to tomorrow end of day
-            $task->deadline = $today->copy()->addDay()->endOfDay();
+            $task->deadline =  Carbon::now()->copy()->addDay()->endOfDay();
             $task->status = 'pending';
             $task->save();
 

@@ -16,19 +16,18 @@ class ResetWeeklyTasks extends Command
     public function handle()
     {
         $fcm = new FcmNotificationService();
-        $today = Carbon::today();
         $resetCount = 0;
 
         // ✅ Only reset weekly tasks that are due this week or earlier
         $tasks = Task::where('type', 'weekly')
-            ->whereDate('deadline', '<=', $today)
+            ->whereDate('deadline', '<=', Carbon::now())
             ->where('status', '!=', 'pending')
             ->with(['employees'])
             ->get();
 
         foreach ($tasks as $task) {
             // set new deadline → next week same weekday end of day
-            $task->deadline = $today->copy()->addWeek()->endOfDay();
+            $task->deadline = Carbon::now()->copy()->addWeek()->endOfDay();
             $task->status = 'pending';
             $task->save();
 

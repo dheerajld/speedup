@@ -21,7 +21,6 @@ class ResetYearlyTasks extends Command
         // ✅ Only reset yearly tasks that are due today or earlier
         $tasks = Task::where('type', 'yearly')
             ->whereDate('deadline', '<=', Carbon::now())
-            ->where('status', '!=', 'pending')
             ->with(['employees'])
             ->get();
 

@@ -21,7 +21,6 @@ class ResetWeeklyTasks extends Command
         // ✅ Only reset weekly tasks that are due this week or earlier
         $tasks = Task::where('type', 'weekly')
             ->whereDate('deadline', '<=', Carbon::now())
-            ->where('status', '!=', 'pending')
             ->with(['employees'])
             ->get();
 

@@ -22,13 +22,13 @@ class ResetDailyTasks extends Command
         // ✅ Only reset tasks that are daily, not pending, and deadline expired or due today
         $tasks = Task::where('type', 'daily')
             ->whereDate('deadline', '<=', Carbon::now())
-            ->where('status', '!=', 'pending')
+            // ->where('status', '!=', 'pending')
             ->with(['employees'])
             ->get();
 
         foreach ($tasks as $task) {
             // set deadline to tomorrow end of day
-            $task->deadline =  Carbon::now()->copy()->addDay()->endOfDay();
+            $task->deadline = Carbon::tomorrow()->setTime(19, 0, 0);
             $task->status = 'pending';
             $task->save();
 

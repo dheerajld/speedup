@@ -21,7 +21,6 @@ class ResetMonthlyTasks extends Command
         // ✅ Only reset monthly tasks that are due today or earlier
         $tasks = Task::where('type', 'monthly')
             ->whereDate('deadline', '<=', Carbon::now())
-            ->where('status', '!=', 'pending')
             ->with(['employees'])
             ->get();
 

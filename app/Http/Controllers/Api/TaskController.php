@@ -125,7 +125,7 @@ public function employeeTasks(Request $request)
     $employee = $request->user();
 
     $tasks = $employee->tasks()
-        ->with('employees:id,name') // load employees without email
+        ->with('employees:id,name') // load only required fields for employees
         ->when($request->type, function ($query, $type) {
             return $query->where('type', $type);
         })
@@ -136,19 +136,23 @@ public function employeeTasks(Request $request)
                   ->where('task_assignments.status', $status);
             });
         })
+        // Select only necessary task columns to reduce payload
+        ->select('tasks.id', 'tasks.name', 'tasks.description', 'tasks.type', 'tasks.created_by', 'tasks.created_at', 'tasks.deadline')
         ->orderBy('deadline')
         ->get()
         ->map(function ($task) use ($employee) {
             return [
-                'task_no'      => $task->id,
-                'name'         => $task->name,
-                'description'  => $task->description,
-                'created_by'   => $task->created_by,
-                'assigned_date'=> $task->created_at->format('Y-m-d H:i:s'),
-                'deadline'     => $task->deadline ? $task->deadline->format('Y-m-d H:i:s') : null,
-                'status'       => $task->employees->where('id', $employee->id)->first()?->pivot->status,
-                'type'         => $task->type,
-                'assigned_to'  => $task->employees->map(function ($emp) {
+                'task_no'       => $task->id,
+                'name'          => $task->name,
+                'description'   => $task->description,
+                'created_by'    => $task->created_by,
+                // Avoid heavy formatting, return ISO where needed
+                'assigned_date' => $task->created_at?->toISOString(),
+                'deadline'      => $task->deadline?->toISOString(),
+                // Use the pivot row from $employee->tasks() relation instead of scanning employees
+                'status'        => $task->pivot->status ?? null,
+                'type'          => $task->type,
+                'assigned_to'   => $task->employees->map(function ($emp) {
                     return [
                         'id'          => $emp->id,
                         'name'        => $emp->name,

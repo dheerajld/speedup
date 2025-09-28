@@ -18,6 +18,7 @@ class Kernel extends ConsoleKernel
         \App\Console\Commands\ResetWeeklyTasks::class,
         \App\Console\Commands\ResetMonthlyTasks::class,
         \App\Console\Commands\ResetYearlyTasks::class,
+        \App\Console\Commands\TruncateEmployeeLocations::class,
     ];
      
     protected function schedule(Schedule $schedule): void
@@ -31,6 +32,9 @@ class Kernel extends ConsoleKernel
         $schedule->command('tasks:reset-weekly')->weeklyOn(0, '00:00'); // Sunday
         $schedule->command('tasks:reset-monthly')->monthlyOn(1, '00:00'); // 1st of month
         $schedule->command('tasks:reset-yearly')->yearlyOn(1, 1, '00:00'); // Jan 1
+        
+        // Truncate employee locations table daily at 1 AM
+        $schedule->command('locations:truncate')->dailyAt('01:00');
         
     }
 

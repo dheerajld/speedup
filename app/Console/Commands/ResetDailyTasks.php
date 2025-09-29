@@ -28,7 +28,7 @@ class ResetDailyTasks extends Command
 
         foreach ($tasks as $task) {
             // set deadline to tomorrow end of day
-            $task->deadline = Carbon::tomorrow()->setTime(19, 0, 0);
+            $task->deadline = Carbon::today()->setTime(19, 0, 0);
             $task->status = 'pending';
             $task->save();
 

@@ -136,7 +136,6 @@ public function employeeTasks(Request $request)
                   ->where('task_assignments.status', $status);
             });
         })
-        // Select only necessary task columns to reduce payload
         ->select('tasks.id', 'tasks.name', 'tasks.description', 'tasks.type', 'tasks.created_by', 'tasks.created_at', 'tasks.deadline')
         ->orderBy('deadline')
         ->get()
@@ -146,10 +145,8 @@ public function employeeTasks(Request $request)
                 'name'          => $task->name,
                 'description'   => $task->description,
                 'created_by'    => $task->created_by,
-                // Avoid heavy formatting, return ISO where needed
-                'assigned_date' => $task->created_at?->toISOString(),
-                'deadline'      => $task->deadline?->toISOString(),
-                // Use the pivot row from $employee->tasks() relation instead of scanning employees
+                'assigned_date' => $task->created_at?->format('Y-m-d H:i:s'),
+                'deadline'      => $task->deadline?->format('Y-m-d H:i:s'),
                 'status'        => $task->pivot->status ?? null,
                 'type'          => $task->type,
                 'assigned_to'   => $task->employees->map(function ($emp) {
@@ -159,15 +156,16 @@ public function employeeTasks(Request $request)
                         'status'      => $emp->pivot->status,
                         'assigned_by' => $emp->pivot->assigned_by,
                     ];
-                }),
+                })->values(),
             ];
         });
 
     return response()->json([
         'status' => 'success',
-        'data' => ['tasks' => $tasks]
+        'data'   => ['tasks' => $tasks]
     ]);
 }
+
 
 
 

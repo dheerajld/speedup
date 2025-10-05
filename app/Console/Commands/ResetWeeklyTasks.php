@@ -26,7 +26,7 @@ class ResetWeeklyTasks extends Command
 
         foreach ($tasks as $task) {
             // set new deadline → next week same weekday end of day
-            $task->deadline = Carbon::now()->copy()->addWeek()->endOfDay();
+            $task->deadline = Carbon::parse($task->deadline)->addWeek()->endOfDay();
             $task->status = 'pending';
             $task->save();
 

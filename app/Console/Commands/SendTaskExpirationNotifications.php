@@ -19,11 +19,13 @@ class SendTaskExpirationNotifications extends Command
         $oneHourFromNow = $now->copy()->addHour();
         $fcm = new FcmNotificationService();
 
+        // 1️⃣ Notify employees for tasks expiring soon
         $notificationCount = $this->sendExpiringSoonNotifications($fcm, $now, $oneHourFromNow);
         $this->info("✅ Sent {$notificationCount} expiring task notification(s).");
 
-        $expiredCount = $this->expireOverdueTasks($now);
-        $this->info("🕓 Marked {$expiredCount} employee-task(s) as expired.");
+        // 2️⃣ Mark overdue tasks as expired (employee-wise)
+        $expiredCount = $this->expireOverdueTasks($now, $fcm);
+        $this->info("🕒 Marked {$expiredCount} employee-task(s) as expired.");
     }
 
     /**
@@ -61,12 +63,12 @@ class SendTaskExpirationNotifications extends Command
     }
 
     /**
-     * 🕓 Expire overdue tasks (employee-wise and globally if needed)
+     * 🕒 Expire overdue employee-tasks and update task status accordingly
      */
-    private function expireOverdueTasks($now): int
+    private function expireOverdueTasks($now, FcmNotificationService $fcm): int
     {
         $tasks = Task::with(['employees' => function ($q) {
-                $q->whereIn('task_assignments.status', ['pending', 'requested']);
+                $q->whereIn('task_assignments.status', ['pending', 'requested', 'completed']);
             }])
             ->where('deadline', '<', $now)
             ->get();
@@ -74,27 +76,68 @@ class SendTaskExpirationNotifications extends Command
         $expiredAssignments = 0;
 
         foreach ($tasks as $task) {
-            if ($task->employees->isNotEmpty()) {
-                // expire all employee assignments
+            // 1️⃣ Expire only pending/requested employees
+            $expiredEmployees = DB::table('task_assignments')
+                ->where('task_id', $task->id)
+                ->whereIn('status', ['pending', 'requested'])
+                ->pluck('employee_id');
+
+            if ($expiredEmployees->count() > 0) {
                 DB::table('task_assignments')
                     ->where('task_id', $task->id)
                     ->whereIn('status', ['pending', 'requested'])
                     ->update(['status' => 'expired']);
 
-                $expiredAssignments += $task->employees->count();
+                // 2️⃣ Send FCM notification to those employees
+                foreach ($expiredEmployees as $employeeId) {
+                    $employee = DB::table('employees')->where('id', $employeeId)->first();
+                    if ($employee && $employee->device_token) {
+                        $fcm->sendAndSave(
+                            'Task Expired',
+                            "Your task '{$task->name}' has expired.",
+                            'task_expired',
+                            $employee->id,
+                            'employee',
+                            $employee->device_token,
+                            ['task_id' => $task->id]
+                        );
+                    }
+                }
+
+                $expiredAssignments += $expiredEmployees->count();
             }
 
-            // check if any active assignments remain
-            $activeCount = DB::table('task_assignments')
+            // 3️⃣ Count statuses for this task
+            $completedCount = DB::table('task_assignments')
                 ->where('task_id', $task->id)
-                ->whereNotIn('status', ['expired', 'completed'])
+                ->where('status', 'completed')
                 ->count();
 
-            if ($activeCount === 0 && $task->status !== 'expired') {
+            $expiredCount = DB::table('task_assignments')
+                ->where('task_id', $task->id)
+                ->where('status', 'expired')
+                ->count();
+
+            $pendingCount = DB::table('task_assignments')
+                ->where('task_id', $task->id)
+                ->whereNotIn('status', ['completed', 'expired'])
+                ->count();
+
+            // 4️⃣ Update task status logically
+            if ($completedCount > 0) {
+                // ✅ At least one employee completed → task stays completed
                 $task->update([
-                    'status' => 'expired',
-                    'expired_count' => DB::raw('expired_count + 1'), // safe increment
+                    'status' => 'completed',
+                    'expired_count' => $expiredCount,
                 ]);
+            } elseif ($pendingCount === 0 && $completedCount === 0) {
+                // ❌ No pending or completed → all expired
+                if (!in_array($task->status, ['completed', 'expired'])) {
+                    $task->update([
+                        'status' => 'expired',
+                        'expired_count' => DB::raw('expired_count + 1'),
+                    ]);
+                }
             }
         }
 
